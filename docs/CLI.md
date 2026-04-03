@@ -81,9 +81,17 @@ Manage the physical or digital resources available for reservation.
 ```bash
 # Single Creation
 ./claimctl resources create --name "Room A" --type "Room" --label "quiet"
+```
 
-# Bulk Creation (from JSON file)
-./claimctl resources create --file resources.json
+**Update Resources**
+
+```bash
+# Update resource properties (merges with existing properties)
+./claimctl resources update <resource-id> --property ip=10.0.0.1
+./claimctl resources update <resource-id> --property user=admin
+
+# Update resource name and type
+./claimctl resources update <resource-id> --name "New Room" --type "Lab"
 ```
 
 **Delete Resources**
@@ -109,13 +117,13 @@ Make and manage bookings.
 ./claimctl reserve --type "Desk"
 ./claimctl reserve --label "dual-monitor"
 
-# Specify Duration
+# Specify Duration (accepts standard formats like '1h', '30m')
 ./claimctl reserve 123 --duration 2h
 
 # Wait for queued reservation to become active
 ./claimctl reserve --type "gpu-server" --wait
 
-# With custom timeout and polling interval
+# With custom timeout and polling interval (values are in seconds)
 ./claimctl reserve --type "gpu-server" --wait --timeout 600 \
   --poll-interval 10
 
@@ -164,26 +172,9 @@ Manage webhooks for integrating with external systems (Slack, Email, etc.).
 # Create Webhook (Single)
 ./claimctl webhooks create --name "Slack" --url "https://hooks.slack.com/..."
 
-# Create Webhooks (Bulk)
-./claimctl webhooks create --file webhooks.json
-
 # Delete Webhook
 ./claimctl webhooks delete <webhook-id>
 ```
-
-**Format for webhooks.json:**
-
-````json
-[
-  {
-    "name": "Slack Notification",
-    "url": "https://hooks.slack.com/services/...",
-    "method": "POST",
-    "headers": {"Content-Type": "application/json"},
-    "template": "{\"text\": \"{{.message}}\"}",
-    "description": "Slack webhook for notifications"
-  }
-]
 
 # Attach
 ./claimctl webhooks attach <resource-id> <webhook-id> \
@@ -265,8 +256,8 @@ No external polling scripts needed! The `--wait` flag handles everything:
 **Available Options:**
 
 - `--wait` - Wait for reservation to become active
-- `--timeout <seconds>` - Maximum wait time (default: 300s)
-- `--poll-interval <seconds>` - Polling interval (default: 5s)
+- `--timeout <seconds>` - Maximum wait time in seconds (default: 300)
+- `--poll-interval <seconds>` - Polling interval in seconds (default: 5)
 - `--quiet` - Only output reservation ID
 
 ### Exit Codes
@@ -290,30 +281,50 @@ busy" ;; 3) echo "Reservation was cancelled" ;; *) echo "Error occurred" ;; esac
 exit $exit_code fi
 ```
 
-### Pipeline Example
+## Bulk Operations
 
-```bash
-#!/bin/bash
-set -e
+The CLI supports bulk creating resources and webhooks from JSON files. This is
+extremely useful for initial environment setup or mass migrations.
 
-# Reserve and wait for activation
-reservation_id=$(./claimctl reserve \ --type "test-environment" \ --label
-"gpu" \ --duration "30m" \ --wait \ --quiet)
+### Bulk Resource Creation
 
-# Ensure cleanup on exit
-trap "./claimctl release $reservation_id" EXIT INT TERM
+Create a `resources.json` file:
 
-# Run your tests
-pytest tests/
-
-# Resource is automatically released by trap
+```json
+[
+  { "name": "Lab 1", "type": "Lab", "labels": ["gpu"] },
+  { "name": "Lab 2", "type": "Lab", "labels": ["gpu"], "properties": {"rack": "A1"} }
+]
 ```
 
-See [`../docs/CLI_PIPELINE_INTEGRATION.md`](../docs/CLI_PIPELINE_INTEGRATION.md)
-for comprehensive CI/CD integration guide.
+Run the import:
 
-See [`../docs/CLI_EXIT_CODES.md`](../docs/CLI_EXIT_CODES.md) for detailed
-exit code documentation and examples.
+```bash
+./claimctl resources create --file resources.json
+```
+
+### Bulk Webhook Creation
+
+Create a `webhooks.json` file:
+
+```json
+[
+  {
+    "name": "Slack Notification",
+    "url": "https://hooks.slack.com/services/...",
+    "method": "POST",
+    "headers": {"Content-Type": "application/json"},
+    "template": "{\"text\": \"{{.message}}\"}",
+    "description": "Slack webhook for notifications"
+  }
+]
+```
+
+Run the import:
+
+```bash
+./claimctl webhooks create --file webhooks.json
+```
 
 ## Automation & Scripting
 
@@ -337,22 +348,6 @@ reservation_id=$(echo "$reservation_json" | jq -r '.id') resource_id=$(echo
 "$reservation_json" | jq -r '.resourceId')
 
 echo "Reserved resource $resource_id with reservation $reservation_id"
-```
-
-**Example: Bulk Import**
-Create a `resources.json` file:
-
-```json
-[
-  { "name": "Lab 1", "type": "Lab", "labels": ["gpu"] },
-  { "name": "Lab 2", "type": "Lab", "labels": ["gpu"] }
-]
-```
-
-Run:
-
-```bash
-./claimctl resources create --file resources.json
 ```
 
 **Example: Check Reservation Status**

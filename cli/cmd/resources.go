@@ -214,10 +214,76 @@ var deleteResourceCmd = &cobra.Command{
 	},
 }
 
+var (
+	updateName       string
+	updateType       string
+	updateLabels     []string
+	updateProperties map[string]string
+)
+
+// updateResourceCmd
+var updateResourceCmd = &cobra.Command{
+	Use:   "update [id]",
+	Short: "Update a resource and merge its properties",
+	Long: `Update a resource's fields. Properties are merged with existing properties.
+Example:
+  claimctl resources update [id] --name "New Name" --property ip=192.168.1.10 --property user=taqi
+`,
+	Args: cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		client, err := api.NewClient(viper.GetString("url"), viper.GetString("token"), viper.GetBool("netrc"))
+		if err != nil {
+			return fmt.Errorf("error creating client: %w", err)
+		}
+
+		id := args[0]
+
+		// Fetch existing resource to merge properties
+		existing, err := client.GetResource(id)
+		if err != nil {
+			return fmt.Errorf("error fetching existing resource: %w", err)
+		}
+
+		// Merge properties
+		mergedProps := existing.Properties
+		if mergedProps == nil {
+			mergedProps = make(map[string]interface{})
+		}
+		for k, v := range updateProperties {
+			mergedProps[k] = v
+		}
+
+		req := api.UpdateResourceRequest{
+			Name:       updateName,
+			Type:       updateType,
+			Labels:     updateLabels,
+			Properties: mergedProps,
+		}
+
+		res, err := client.UpdateResource(id, req)
+		if err != nil {
+			return fmt.Errorf("error updating resource: %w", err)
+		}
+
+		if viper.GetBool("json") {
+			data, err := json.MarshalIndent(res, "", "  ")
+			if err != nil {
+				return fmt.Errorf("error marshalling to JSON: %w", err)
+			}
+			fmt.Println(string(data))
+			return nil
+		}
+
+		fmt.Printf("Resource updated successfully: %s (ID: %s)\n", res.Name, res.ID)
+		return nil
+	},
+}
+
 func init() {
 	rootCmd.AddCommand(resourcesCmd)
 	resourcesCmd.AddCommand(listResourcesCmd)
 	resourcesCmd.AddCommand(createResourceCmd)
+	resourcesCmd.AddCommand(updateResourceCmd)
 	resourcesCmd.AddCommand(deleteResourceCmd)
 
 	listResourcesCmd.Flags().StringVar(&filterType, "type", "", "Filter resources by type")
@@ -228,4 +294,9 @@ func init() {
 	createResourceCmd.Flags().StringSliceVar(&createLabels, "label", []string{}, "Resource Labels")
 	createResourceCmd.Flags().StringToStringVar(&createProperties, "property", nil, "Resource Properties (key=value)")
 	createResourceCmd.Flags().StringVar(&createFile, "file", "", "JSON file for bulk creation")
+
+	updateResourceCmd.Flags().StringVar(&updateName, "name", "", "New Resource Name")
+	updateResourceCmd.Flags().StringVar(&updateType, "type", "", "New Resource Type")
+	updateResourceCmd.Flags().StringSliceVar(&updateLabels, "label", []string{}, "New Resource Labels")
+	updateResourceCmd.Flags().StringToStringVar(&updateProperties, "property", nil, "Resource Properties to add/update (key=value)")
 }

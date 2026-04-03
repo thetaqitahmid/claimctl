@@ -170,6 +170,32 @@ func (c *Client) CreateResource(req CreateResourceRequest) (*Resource, error) {
 	return &resource, nil
 }
 
+func (c *Client) GetResource(id string) (*Resource, error) {
+	resp, err := c.request("GET", fmt.Sprintf("/api/resources/%s", id), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	var resource Resource
+	if err := json.Unmarshal(resp, &resource); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal resource: %w", err)
+	}
+	return &resource, nil
+}
+
+func (c *Client) UpdateResource(id string, req UpdateResourceRequest) (*Resource, error) {
+	resp, err := c.request("PATCH", fmt.Sprintf("/api/resources/%s", id), req)
+	if err != nil {
+		return nil, err
+	}
+
+	var resource Resource
+	if err := json.Unmarshal(resp, &resource); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal resource: %w", err)
+	}
+	return &resource, nil
+}
+
 func (c *Client) DeleteResource(id string) error {
 	_, err := c.request("DELETE", fmt.Sprintf("/api/resources/%s", id), nil)
 	return err

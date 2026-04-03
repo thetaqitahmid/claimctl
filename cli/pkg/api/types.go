@@ -123,6 +123,15 @@ type CreateResourceRequest struct {
 	Properties map[string]interface{} `json:"properties"`
 }
 
+// UpdateResourceRequest is the payload for updating a resource.
+type UpdateResourceRequest struct {
+	Name       string                 `json:"name,omitempty"`
+	Type       string                 `json:"type,omitempty"`
+	Labels     []string               `json:"labels,omitempty"`
+	Properties map[string]interface{} `json:"properties,omitempty"`
+}
+
+
 // Secret matches the secret object from the API.
 type Secret struct {
 	ID          string `json:"id"`

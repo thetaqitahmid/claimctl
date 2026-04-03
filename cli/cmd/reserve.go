@@ -46,11 +46,6 @@ Examples:
 		var resourceID string
 		var resourceName string
 
-		// Logic priority:
-		// 1. Positional Argument (ID)
-		// 2. Name flag (Search)
-		// 3. Type/Label flags (Search)
-
 		if len(args) > 0 {
 			// Expecting ID
 			resourceID = args[0]
@@ -59,8 +54,6 @@ Examples:
 			if reserveRequireHealthy {
 				status, err := client.GetHealthStatus(resourceID)
 				if err != nil {
-					// If 404, maybe no health check configured? treat as unknown/failure?
-					// For now, fail if we can't get status
 					return fmt.Errorf("error checking resource health: %w", err)
 				}
 				if !strings.EqualFold(status.Status, "healthy") {
@@ -76,7 +69,6 @@ Examples:
 			return fmt.Errorf("must provide a Resource ID, --name, or --type/--label-expr flags")
 		}
 
-		// Need to fetch resources if looking up by name OR type/label
 		if resourceID == "" {
 			// Search for resource
 			fmt.Printf("Searching for resource...")
@@ -101,7 +93,7 @@ Examples:
 						found = true
 						break
 					}
-					continue // If name is set, we ignore type/label logic below for this iteration
+					continue
 				}
 
 				// 2. Type/Label Match (Must be Available)
@@ -122,9 +114,6 @@ Examples:
 				if reserveType != "" && !strings.EqualFold(r.Type, reserveType) {
 					continue
 				}
-
-				// Filtering by Label Expr is already handled by the backend
-				// (We passed reserveLabelExpr to GetResources)
 
 				// Match found!
 				resourceID = r.ID

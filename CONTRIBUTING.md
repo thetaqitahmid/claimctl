@@ -57,4 +57,4 @@ Append a `!` after the type/scope for breaking changes (e.g., `refactor!: ...`).
 4. Wait for a review from the maintainers.
 
 By contributing to this project, you agree that your contributions will be
-licensed under its AGPL v3.0 License.
+licensed under its Apache 2.0 License.

@@ -1,6 +1,6 @@
 # claimctl
 
-[![License: AGPL v3](https://img.shields.io/badge/License-AGPL_v3-blue.svg)](https://www.gnu.org/licenses/agpl-3.0)
+[![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](https://www.apache.org/licenses/LICENSE-2.0)
 
 > [!IMPORTANT]
 > This project is currently under development. The code may change frequently
@@ -214,5 +214,5 @@ development documentation.
 
 ## License
 
-This project is licensed under the GNU Affero General Public License v3.0
-(AGPLv3) - see the `LICENSE` file for details.
+This project is licensed under the Apache 2.0 License - see the `LICENSE` file
+for details.

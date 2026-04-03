@@ -35,6 +35,16 @@ func TestDeleteResourceCmd_Structure(t *testing.T) {
 	assert.NotNil(t, deleteResourceCmd.Args)
 }
 
+func TestUpdateResourceCmd_Structure(t *testing.T) {
+	// Test command structure
+	assert.Equal(t, "update [id]", updateResourceCmd.Use)
+	assert.Equal(t, "Update a resource and merge its properties", updateResourceCmd.Short)
+	assert.NotNil(t, updateResourceCmd.RunE)
+
+	// Test argument validation
+	assert.NotNil(t, updateResourceCmd.Args)
+}
+
 func TestResourcesCommand_Structure(t *testing.T) {
 	// Test that resources command has proper subcommands
 	assert.NotNil(t, resourcesCmd)
@@ -43,7 +53,7 @@ func TestResourcesCommand_Structure(t *testing.T) {
 
 	// Check subcommands
 	subcommands := resourcesCmd.Commands()
-	assert.Len(t, subcommands, 3, "Should have exactly 3 subcommands")
+	assert.Len(t, subcommands, 4, "Should have exactly 4 subcommands")
 
 	// Extract just the command name (before any arguments)
 	commandNames := make([]string, len(subcommands))
@@ -53,6 +63,7 @@ func TestResourcesCommand_Structure(t *testing.T) {
 	}
 	assert.Contains(t, commandNames, "list")
 	assert.Contains(t, commandNames, "create")
+	assert.Contains(t, commandNames, "update")
 	assert.Contains(t, commandNames, "delete")
 }
 
@@ -73,6 +84,13 @@ func TestResourceCommandFlags(t *testing.T) {
 	// Test delete command flags (should not have specific flags, just args)
 	deleteFlags := deleteResourceCmd.Flags()
 	assert.NotNil(t, deleteFlags)
+
+	// Test update command flags
+	updateFlags := updateResourceCmd.Flags()
+	assert.NotNil(t, updateFlags.Lookup("name"))
+	assert.NotNil(t, updateFlags.Lookup("type"))
+	assert.NotNil(t, updateFlags.Lookup("label"))
+	assert.NotNil(t, updateFlags.Lookup("property"))
 }
 
 func TestResourceCommandFlagDefaults(t *testing.T) {
@@ -88,6 +106,12 @@ func TestResourceCommandFlagDefaults(t *testing.T) {
 	assert.Equal(t, []string{}, createLabels)
 	assert.Equal(t, "", createFile)
 	assert.Nil(t, createProperties)
+
+	// Update command defaults
+	assert.Equal(t, "", updateName)
+	assert.Equal(t, "", updateType)
+	assert.Equal(t, []string{}, updateLabels)
+	assert.Nil(t, updateProperties)
 }
 
 func TestResourceCommandFilterLogic(t *testing.T) {
@@ -182,6 +206,7 @@ func TestResourcesCommandInitialization(t *testing.T) {
 	require.NotNil(t, resourcesCmd)
 	require.NotNil(t, listResourcesCmd)
 	require.NotNil(t, createResourceCmd)
+	require.NotNil(t, updateResourceCmd)
 	require.NotNil(t, deleteResourceCmd)
 
 	// Test that commands are added to root
@@ -197,7 +222,7 @@ func TestResourcesCommandInitialization(t *testing.T) {
 
 	// Test that subcommands are added to resources
 	resourceCommands := resourcesCmd.Commands()
-	assert.Len(t, resourceCommands, 3)
+	assert.Len(t, resourceCommands, 4)
 }
 
 func TestCommandExecutionSetup(t *testing.T) {

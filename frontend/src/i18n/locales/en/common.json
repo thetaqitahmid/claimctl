@@ -1,0 +1,49 @@
+{
+  "appName": "claimctl",
+  "loading": "Loading...",
+  "error": "Error",
+  "success": "Success",
+  "cancel": "Cancel",
+  "save": "Save",
+  "delete": "Delete",
+  "edit": "Edit",
+  "add": "Add",
+  "confirm": "Confirm",
+  "close": "Close",
+  "back": "Back",
+  "next": "Next",
+  "submit": "Submit",
+  "search": "Search",
+  "filter": "Filter",
+  "refresh": "Refresh",
+  "actions": "Actions",
+  "yes": "Yes",
+  "no": "No",
+  "enabled": "Enabled",
+  "disabled": "Disabled",
+  "status": {
+    "all": "All",
+    "available": "Available",
+    "busy": "Busy",
+    "queued": "Queued",
+    "maintenance": "Maintenance",
+    "offline": "Offline",
+    "active": "Active",
+    "pending": "Pending",
+    "completed": "Completed",
+    "cancelled": "Cancelled"
+  },
+  "validation": {
+    "required": "This field is required",
+    "invalidEmail": "Invalid email address",
+    "invalidPassword": "Password must be at least 8 characters",
+    "passwordMismatch": "Passwords do not match"
+  },
+  "errors": {
+    "generic": "Something went wrong",
+    "notFound": "Not found",
+    "unauthorized": "Unauthorized",
+    "forbidden": "Access denied",
+    "serverError": "Server error"
+  }
+}

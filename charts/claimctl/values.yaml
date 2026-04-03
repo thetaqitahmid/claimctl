@@ -1,0 +1,195 @@
+# Default values for claimctl.
+
+imagePullSecrets: []
+nameOverride: ""
+fullnameOverride: ""
+
+serviceAccount:
+  # Specifies whether a service account should be created
+  # Required if appEncryptionKey is not provided (enables key generation)
+  create: true
+  # Annotations to add to the service account
+  annotations: {}
+  # The name of the service account to use.
+  # If not set and create is true, a name is generated using the fullname template
+  name: ""
+
+keyGeneration:
+  # Enable if appEncryptionKey is not provided to auto-generate one
+  enabled: false
+  image:
+    repository: bitnami/kubectl
+    tag: "latest"
+    pullPolicy: IfNotPresent
+  secretName: "" # Defaults to fullname-secret if empty
+  keyName: "app-encryption-key"
+backend:
+  replicaCount: 1
+  strategy: {}
+  podAnnotations: {}
+  waitForDb:
+    enabled: true
+    image:
+      repository: postgres
+      tag: "18-alpine"
+      pullPolicy: IfNotPresent
+  pdb:
+    enabled: false
+    minAvailable: 1
+  autoscaling:
+    enabled: false
+    minReplicas: 1
+    maxReplicas: 10
+    targetCPUUtilizationPercentage: 80
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+  image:
+    repository: ghcr.io/thetaqitahmid/claimctl/backend
+    pullPolicy: IfNotPresent
+    # Overrides the image tag whose default is the chart appVersion.
+    tag: "latest"
+  service:
+    type: ClusterIP
+    port: 3000
+  otel:
+    endpoint: "" # e.g. http://otel-collector:4318
+  sslMode: "disable"
+  resources:
+    limits:
+      cpu: 500m
+      memory: 512Mi
+    requests:
+      cpu: 250m
+      memory: 256Mi
+  livenessProbe:
+    httpGet:
+      path: /v1/health
+      port: http
+    initialDelaySeconds: 15
+    periodSeconds: 10
+  readinessProbe:
+    httpGet:
+      path: /v1/health
+      port: http
+    initialDelaySeconds: 5
+    periodSeconds: 10
+
+  containerSecurityContext:
+    readOnlyRootFilesystem: false # Depends on your app's needs (e.g. if it writes to /tmp)
+    runAsNonRoot: true
+    runAsUser: 1001
+
+frontend:
+  replicaCount: 1
+  strategy: {}
+  podAnnotations: {}
+  pdb:
+    enabled: false
+    minAvailable: 1
+  autoscaling:
+    enabled: false
+    minReplicas: 1
+    maxReplicas: 10
+    targetCPUUtilizationPercentage: 80
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+  image:
+    repository: ghcr.io/thetaqitahmid/claimctl/frontend
+    pullPolicy: IfNotPresent
+    tag: "latest"
+  service:
+    type: ClusterIP
+    port: 80
+  resources:
+    limits:
+      cpu: 250m
+      memory: 256Mi
+    requests:
+      cpu: 100m
+      memory: 128Mi
+  livenessProbe:
+    httpGet:
+      path: /
+      port: http
+    initialDelaySeconds: 30
+    periodSeconds: 20
+  readinessProbe:
+    httpGet:
+      path: /
+      port: http
+    initialDelaySeconds: 10
+    periodSeconds: 10
+  securityContext: {}
+  containerSecurityContext:
+    runAsNonRoot: true
+    runAsUser: 1001
+
+ingress:
+  enabled: false
+  # className: ""
+  annotations: {}
+  hosts:
+    - host: example.com
+      paths:
+        - path: /
+          pathType: Prefix
+          service: frontend
+          port: 80
+        - path: /api
+          pathType: Prefix
+          service: backend
+          port: 3000
+  # tls: []
+  #  - secretName: chart-example-tls
+  #    hosts:
+  #      - chart-example.local
+
+db:
+  host: db
+  port: 5432
+  user: "" # devuser
+  name: "" # devdb
+  password: "" # devpass. In production, use secrets!
+  # If existingSecret is set, the password and user will be retrieved from the secret.
+  # existingSecret: "my-db-secret"
+  # existingSecretUserKey: "db-user"
+  # existingSecretPasswordKey: "db-password"
+
+appEncryption:
+  # Provide the name of an existing Kubernetes secret if you prefer to manage secrets outside Helm
+  existingSecret: ""
+  secretKey: "app-encryption-key"
+
+postgres:
+  enabled: false
+  affinity: {}
+  podLabels: {}
+  nodeSelector: {}
+  settings:
+    superuserPassword:
+      value: "" # Required for initialization. In production, use existingSecret!
+  #   existingSecret: "my-postgres-secret"
+  #   secretKey: "admin-password"
+  userDatabase:
+    # existingSecret: "my-app-db-secret"
+    # name:
+    #   secretKey: "db-name"
+    # user:
+    #   secretKey: "db-user"
+    # password:
+    #   secretKey: "db-password"
+    # Fallback to plaintext for dev if no secret provided
+    name:
+      value: "" # devdb
+    user:
+      value: "" # devuser
+    password:
+      value: "" # devpass
+  storage:
+    requestedSize: 1Gi
+    accessModes:
+      - ReadWriteOnce
+    # volumeName: "postgres-data"
+    # className: "longhorn"

@@ -1,0 +1,165 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "claimctl.fullname" . }}-backend
+  labels:
+    app.kubernetes.io/name: {{ include "claimctl.name" . }}
+    helm.sh/chart: {{ include "claimctl.chart" . }}
+    app.kubernetes.io/instance: {{ .Release.Name }}
+    app.kubernetes.io/managed-by: {{ .Release.Service }}
+    app.kubernetes.io/component: backend
+spec:
+  replicas: {{ .Values.backend.replicaCount }}
+  {{- with .Values.backend.strategy }}
+  strategy:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: {{ include "claimctl.name" . }}
+      app.kubernetes.io/instance: {{ .Release.Name }}
+      app.kubernetes.io/component: backend
+  template:
+    metadata:
+      {{- with .Values.backend.podAnnotations }}
+      annotations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      labels:
+        app.kubernetes.io/name: {{ include "claimctl.name" . }}
+        app.kubernetes.io/instance: {{ .Release.Name }}
+        app.kubernetes.io/component: backend
+    spec:
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      serviceAccountName: {{ include "claimctl.serviceAccountName" . }}
+      initContainers:
+        {{- if .Values.backend.waitForDb.enabled }}
+        - name: wait-for-db
+          image: "{{ .Values.backend.waitForDb.image.repository }}:{{ .Values.backend.waitForDb.image.tag }}"
+          imagePullPolicy: {{ .Values.backend.waitForDb.image.pullPolicy }}
+          command: ['sh', '-c', 'until pg_isready -h {{ if .Values.postgres.enabled }}{{ printf "%s-postgres" .Release.Name }}{{ else }}{{ .Values.db.host }}{{ end }} -p {{ .Values.db.port }} -U {{ if .Values.postgres.enabled }}{{ .Values.postgres.userDatabase.user.value }}{{ else }}{{ .Values.db.user }}{{ end }}; do echo waiting for database; sleep 2; done;']
+        {{- end }}
+        {{- if .Values.keyGeneration.enabled }}
+        - name: generate-app-key
+          image: "{{ .Values.keyGeneration.image.repository }}:{{ .Values.keyGeneration.image.tag }}"
+          imagePullPolicy: {{ .Values.keyGeneration.image.pullPolicy }}
+          command: ["/bin/sh", "-c"]
+          args:
+            - |
+              SECRET_NAME={{ .Values.keyGeneration.secretName | default (printf "%s-secret" (include "claimctl.fullname" .)) }}
+              KEY_NAME={{ .Values.keyGeneration.keyName }}
+
+              if kubectl get secret $SECRET_NAME -n {{ .Release.Namespace }}; then
+                echo "Secret $SECRET_NAME already exists"
+              else
+                echo "Generating new app encryption key..."
+                # Generate 32 bytes random key and base64 encode it
+                KEY=$(head -c 32 /dev/urandom | base64)
+                kubectl create secret generic $SECRET_NAME -n {{ .Release.Namespace }} --from-literal=$KEY_NAME=$KEY
+                echo "Secret $SECRET_NAME created"
+              fi
+      {{- end }}
+      containers:
+        - name: backend
+          image: "{{ .Values.backend.image.repository }}:{{ .Values.backend.image.tag | default .Chart.AppVersion }}"
+          imagePullPolicy: {{ .Values.backend.image.pullPolicy }}
+          securityContext:
+            {{- toYaml .Values.backend.containerSecurityContext | nindent 12 }}
+          ports:
+            - name: http
+              containerPort: 3000
+              protocol: TCP
+          livenessProbe:
+            {{- toYaml .Values.backend.livenessProbe | nindent 12 }}
+          readinessProbe:
+            {{- toYaml .Values.backend.readinessProbe | nindent 12 }}
+          env:
+            - name: DB_HOST
+              value: {{ if .Values.postgres.enabled }}{{ printf "%s-postgres" .Release.Name | quote }}{{ else }}{{ .Values.db.host | quote }}{{ end }}
+            - name: DB_PORT
+              value: {{ .Values.db.port | quote }}
+            - name: DB_USER
+              {{- if .Values.postgres.enabled }}
+              {{- if .Values.postgres.userDatabase.existingSecret }}
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.postgres.userDatabase.existingSecret }}
+                  key: {{ .Values.postgres.userDatabase.user.secretKey | default "db-user" }}
+              {{- else }}
+              value: {{ .Values.postgres.userDatabase.user.value | quote }}
+              {{- end }}
+              {{- else if .Values.db.existingSecret }}
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.db.existingSecret }}
+                  key: {{ .Values.db.existingSecretUserKey | default "db-user" }}
+              {{- else }}
+              value: {{ .Values.db.user | quote }}
+              {{- end }}
+            - name: DB_PASSWORD
+              {{- if .Values.postgres.enabled }}
+              {{- if .Values.postgres.userDatabase.existingSecret }}
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.postgres.userDatabase.existingSecret }}
+                  key: {{ .Values.postgres.userDatabase.password.secretKey | default "db-password" }}
+              {{- else }}
+              value: {{ .Values.postgres.userDatabase.password.value | quote }}
+              {{- end }}
+              {{- else if .Values.db.existingSecret }}
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.db.existingSecret }}
+                  key: {{ .Values.db.existingSecretPasswordKey | default "db-password" }}
+              {{- else }}
+              value: {{ .Values.db.password | quote }}
+              {{- end }}
+            - name: DB_NAME
+              {{- if .Values.postgres.enabled }}
+              {{- if .Values.postgres.userDatabase.existingSecret }}
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.postgres.userDatabase.existingSecret }}
+                  key: {{ .Values.postgres.userDatabase.name.secretKey | default "db-name" }}
+              {{- else }}
+              value: {{ .Values.postgres.userDatabase.name.value | quote }}
+              {{- end }}
+              {{- else }}
+              value: {{ .Values.db.name | quote }}
+              {{- end }}
+            - name: SSL_MODE
+              value: {{ .Values.backend.sslMode | quote }}
+            {{- if .Values.backend.otel.endpoint }}
+            - name: OTEL_EXPORTER_OTLP_ENDPOINT
+              value: {{ .Values.backend.otel.endpoint | quote }}
+            {{- end }}
+            {{- if .Values.appEncryption.existingSecret }}
+            - name: APP_ENCRYPTION_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.appEncryption.existingSecret }}
+                  key: {{ .Values.appEncryption.secretKey | default "app-encryption-key" }}
+            {{- else if .Values.keyGeneration.enabled }}
+            - name: APP_ENCRYPTION_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.keyGeneration.secretName | default (printf "%s-secret" (include "claimctl.fullname" .)) }}
+                  key: {{ .Values.keyGeneration.keyName }}
+            {{- end }}
+          resources:
+            {{- toYaml .Values.backend.resources | nindent 12 }}
+      {{- with .Values.backend.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.backend.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.backend.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}

@@ -1,0 +1,7 @@
+1. Get the application URL:
+{{- if .Values.ingress.enabled }}
+  http{{ if index .Values.ingress "tls" }}s{{ end }}://{{ (index .Values.ingress.hosts 0).host }}
+{{- else }}
+  You can access the frontend via port-forwarding:
+  kubectl port-forward svc/{{ include "claimctl.fullname" . }}-frontend 8080:80
+{{- end }}

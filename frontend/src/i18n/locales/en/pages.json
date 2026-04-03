@@ -1,0 +1,58 @@
+{
+  "login": {
+    "title": "Welcome back",
+    "subtitle": "Sign in to your account",
+    "ldapTitle": "Sign in with LDAP",
+    "ldapSubtitle": "Use your organization credentials",
+    "emailLabel": "Email",
+    "emailPlaceholder": "Enter your email",
+    "passwordLabel": "Password",
+    "passwordPlaceholder": "Enter your password",
+    "ldapToggle": "Use LDAP Login",
+    "signIn": "Sign In",
+    "ldapSignIn": "Login with LDAP",
+    "ssoSignIn": "Sign in with SSO",
+    "orContinueWith": "Or continue with",
+    "invalidCredentials": "Invalid email or password",
+    "footer": "© {{year}} claimctl. All rights reserved."
+  },
+  "home": {
+    "title": "Resources",
+    "subtitle": "Manage resources and check availability",
+    "spaces": "Spaces",
+    "addResource": "Add Resource",
+    "loadingResources": "Loading resources...",
+    "fetchError": "Failed to fetch resources"
+  },
+  "admin": {
+    "title": "Admin Panel",
+    "userManagement": "User Management",
+    "resourceManagement": "Resource Management",
+    "groupManagement": "Group Management",
+    "spaceManagement": "Space Management",
+    "settings": "Settings"
+  },
+  "profile": {
+    "title": "Profile",
+    "personalInfo": "Personal Information",
+    "notifications": "Notifications",
+    "apiTokens": "API Tokens",
+    "history": "History",
+    "reservations": "My Reservations"
+  },
+  "secrets": {
+    "title": "Secrets",
+    "subtitle": "Manage secret keys and credentials",
+    "addSecret": "Add Secret",
+    "editSecret": "Edit Secret",
+    "deleteSecret": "Delete Secret"
+  },
+  "webhooks": {
+    "title": "Webhooks",
+    "subtitle": "Manage webhook integrations",
+    "addWebhook": "Add Webhook",
+    "editWebhook": "Edit Webhook",
+    "deleteWebhook": "Delete Webhook",
+    "testWebhook": "Test Webhook"
+  }
+}

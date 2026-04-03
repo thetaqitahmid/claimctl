@@ -1,0 +1,85 @@
+{
+  "navbar": {
+    "userMenu": "User Menu",
+    "profile": "Profile",
+    "logout": "Logout",
+    "adminPanel": "Admin Panel",
+    "secrets": "Secrets",
+    "webhooks": "Webhooks",
+    "settings": "Settings"
+  },
+  "resourceList": {
+    "noResources": "No resources found",
+    "noResourcesInSpace": "No resources in this space",
+    "reserve": "Reserve",
+    "release": "Release",
+    "view": "View",
+    "edit": "Edit",
+    "delete": "Delete",
+    "queue": "Queue",
+    "inQueue": "In Queue",
+    "cancelAll": "Cancel All Reservations",
+    "maintenance": {
+      "enable": "Enable Maintenance",
+      "disable": "Disable Maintenance",
+      "reason": "Reason for maintenance (optional)",
+      "reasonPlaceholder": "Enter maintenance reason...",
+      "confirmEnable": "Are you sure you want to enable maintenance mode for \"{{name}}\"? This will prevent users from making new reservations.",
+      "confirmDisable": "Are you sure you want to disable maintenance mode for \"{{name}}\"? Users will be able to reserve this resource again."
+    }
+  },
+  "resourceTable": {
+    "name": "Name",
+    "type": "Type",
+    "status": "Status",
+    "labels": "Labels",
+    "actions": "Actions",
+    "noData": "No resources found",
+    "filterPlaceholder": "Filter names...",
+    "queueActive": "Queue / Active",
+    "notConfigured": "Not configured"
+  },
+  "reservationModal": {
+    "title": "Reserve {{resourceName}}",
+    "duration": "Duration (optional)",
+    "durationPlaceholder": "e.g., 2h, 30m, 1d",
+    "confirm": "Confirm Reservation",
+    "timedReservation": "Timed Reservation",
+    "indefiniteReservation": "Indefinite Reservation"
+  },
+  "confirmationModal": {
+    "cancelAllTitle": "Cancel All Reservations",
+    "cancelAllMessage": "Are you sure you want to cancel ALL active and pending reservations for this resource? This action cannot be undone.",
+    "confirmYes": "Yes, Cancel All",
+    "confirmNo": "No, Keep Reservations"
+  },
+  "addResource": {
+    "title": "Add New Resource",
+    "nameLabel": "Resource Name",
+    "namePlaceholder": "Enter resource name",
+    "typeLabel": "Resource Type",
+    "typePlaceholder": "Enter resource type",
+    "labelsLabel": "Labels",
+    "labelsPlaceholder": "Add labels (press Enter)",
+    "propertiesLabel": "Properties",
+    "propertiesKeyPlaceholder": "Key",
+    "propertiesValuePlaceholder": "Value",
+    "spaceLabel": "Space",
+    "spacePlaceholder": "Select a space"
+  },
+  "userTable": {
+    "name": "Name",
+    "email": "Email",
+    "role": "Role",
+    "status": "Status",
+    "actions": "Actions",
+    "admin": "Admin",
+    "user": "User",
+    "active": "Active",
+    "inactive": "Inactive",
+    "noUsers": "No users found"
+  },
+  "footer": {
+    "copyright": "© {{year}} claimctl"
+  }
+}

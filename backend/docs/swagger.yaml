@@ -1,0 +1,876 @@
+basePath: /api
+definitions:
+  internal_server_handlers.CreateUserParams:
+    properties:
+      admin:
+        type: boolean
+      email:
+        type: string
+      lastLogin:
+        $ref: "#/definitions/pgtype.Timestamptz"
+      name:
+        type: string
+      password:
+        type: string
+      role:
+        type: string
+      status:
+        type: string
+    type: object
+  internal_server_handlers.LoginRequest:
+    properties:
+      email:
+        type: string
+      password:
+        type: string
+    type: object
+  internal_server_handlers.ClaimctlReservation:
+    properties:
+      createdAt:
+        $ref: "#/definitions/pgtype.Int8"
+      duration:
+        $ref: "#/definitions/pgtype.Interval"
+      endTime:
+        $ref: "#/definitions/pgtype.Int8"
+      id:
+        type: integer
+      queuePosition:
+        $ref: "#/definitions/pgtype.Int4"
+      resourceId:
+        type: integer
+      scheduledEndTime:
+        $ref: "#/definitions/pgtype.Timestamptz"
+      startTime:
+        $ref: "#/definitions/pgtype.Int8"
+      status:
+        $ref: "#/definitions/pgtype.Text"
+      updatedAt:
+        $ref: "#/definitions/pgtype.Int8"
+      userId:
+        type: integer
+    type: object
+  internal_server_handlers.ClaimctlResource:
+    properties:
+      createdAt:
+        $ref: "#/definitions/pgtype.Int8"
+      id:
+        type: integer
+      labels:
+        items: {}
+        type: array
+      name:
+        type: string
+      properties:
+        $ref: "#/definitions/claimctl_com_internal_types.JSONBMap"
+      spaceId:
+        type: integer
+      type:
+        type: string
+      updatedAt:
+        $ref: "#/definitions/pgtype.Int8"
+    type: object
+  internal_server_handlers.ClaimctlUser:
+    properties:
+      admin:
+        type: boolean
+      createdAt:
+        $ref: "#/definitions/pgtype.Timestamptz"
+      email:
+        type: string
+      id:
+        type: integer
+      lastLogin:
+        $ref: "#/definitions/pgtype.Timestamptz"
+      name:
+        type: string
+      password:
+        type: string
+      role:
+        type: string
+      slackDestination:
+        $ref: "#/definitions/pgtype.Text"
+      status:
+        type: string
+      teamsWebhookUrl:
+        $ref: "#/definitions/pgtype.Text"
+      updatedAt:
+        $ref: "#/definitions/pgtype.Timestamptz"
+    type: object
+  pgtype.Bool:
+    properties:
+      bool:
+        type: boolean
+      valid:
+        type: boolean
+    type: object
+  pgtype.InfinityModifier:
+    enum:
+      - 1
+      - 0
+      - -1
+    format: int32
+    type: integer
+    x-enum-varnames:
+      - Infinity
+      - Finite
+      - NegativeInfinity
+  pgtype.Int4:
+    properties:
+      int32:
+        format: int32
+        type: integer
+      valid:
+        type: boolean
+    type: object
+  pgtype.Int8:
+    properties:
+      int64:
+        format: int64
+        type: integer
+      valid:
+        type: boolean
+    type: object
+  pgtype.Interval:
+    properties:
+      days:
+        format: int32
+        type: integer
+      microseconds:
+        format: int64
+        type: integer
+      months:
+        format: int32
+        type: integer
+      valid:
+        type: boolean
+    type: object
+  pgtype.Text:
+    properties:
+      string:
+        type: string
+      valid:
+        type: boolean
+    type: object
+  pgtype.Timestamptz:
+    properties:
+      infinityModifier:
+        $ref: "#/definitions/pgtype.InfinityModifier"
+      time:
+        type: string
+      valid:
+        type: boolean
+    type: object
+  claimctl_com_internal_db.CreateNewResourceParams:
+    properties:
+      labels:
+        items: {}
+        type: array
+      name:
+        type: string
+      properties:
+        $ref: "#/definitions/claimctl_com_internal_types.JSONBMap"
+      spaceId:
+        type: integer
+      type:
+        type: string
+    type: object
+  claimctl_com_internal_db.ClaimctlResource:
+    properties:
+      createdAt:
+        $ref: "#/definitions/pgtype.Int8"
+      id:
+        type: integer
+      labels:
+        items: {}
+        type: array
+      name:
+        type: string
+      properties:
+        $ref: "#/definitions/claimctl_com_internal_types.JSONBMap"
+      spaceId:
+        type: integer
+      type:
+        type: string
+      updatedAt:
+        $ref: "#/definitions/pgtype.Int8"
+    type: object
+  claimctl_com_internal_db.ClaimctlResourceHealthConfig:
+    properties:
+      checkType:
+        type: string
+      createdAt:
+        $ref: "#/definitions/pgtype.Int8"
+      enabled:
+        $ref: "#/definitions/pgtype.Bool"
+      intervalSeconds:
+        $ref: "#/definitions/pgtype.Int4"
+      resourceId:
+        type: integer
+      retryCount:
+        $ref: "#/definitions/pgtype.Int4"
+      target:
+        type: string
+      timeoutSeconds:
+        $ref: "#/definitions/pgtype.Int4"
+      updatedAt:
+        $ref: "#/definitions/pgtype.Int8"
+    type: object
+  claimctl_com_internal_db.ClaimctlResourceHealthStatus:
+    properties:
+      checkedAt:
+        type: integer
+      createdAt:
+        $ref: "#/definitions/pgtype.Int8"
+      errorMessage:
+        $ref: "#/definitions/pgtype.Text"
+      id:
+        type: integer
+      resourceId:
+        type: integer
+      responseTimeMs:
+        $ref: "#/definitions/pgtype.Int4"
+      status:
+        type: string
+    type: object
+  claimctl_com_internal_db.UpdateResourceByIdParams:
+    properties:
+      id:
+        type: integer
+      labels:
+        items: {}
+        type: array
+      name:
+        type: string
+      properties:
+        $ref: "#/definitions/claimctl_com_internal_types.JSONBMap"
+      type:
+        type: string
+    type: object
+  claimctl_com_internal_services.ResourceWithStatus:
+    properties:
+      activeReservations:
+        type: integer
+      healthConfig:
+        $ref: "#/definitions/claimctl_com_internal_db.ClaimctlResourceHealthConfig"
+      healthStatus:
+        $ref: "#/definitions/claimctl_com_internal_db.ClaimctlResourceHealthStatus"
+      nextQueuePosition:
+        type: integer
+      nextUserId:
+        type: integer
+      queueLength:
+        type: integer
+      resource:
+        $ref: "#/definitions/claimctl_com_internal_db.ClaimctlResource"
+    type: object
+  claimctl_com_internal_types.JSONBMap:
+    additionalProperties:
+      type: string
+    type: object
+host: localhost:3000
+info:
+  contact:
+    email: support@github.com/thetaqitahmid/claimctl
+    name: API Support
+  description: API documentation for claimctl resource management system.
+  license:
+    name: Apache 2.0
+    url: http://www.apache.org/licenses/LICENSE-2.0.html
+  termsOfService: http://swagger.io/terms/
+  title: claimctl API
+  version: "1.0"
+paths:
+  /login:
+    post:
+      consumes:
+        - application/json
+      description: Authenticate a user and return a JWT token.
+      parameters:
+        - description: Login Credentials
+          in: body
+          name: loginRequest
+          required: true
+          schema:
+            $ref: "#/definitions/internal_server_handlers.LoginRequest"
+      produces:
+        - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: User Login
+      tags:
+        - auth
+  /me:
+    get:
+      consumes:
+        - application/json
+      description: Retrieve details of the currently authenticated user.
+      produces:
+        - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Get current user
+      tags:
+        - users
+  /reservations:
+    post:
+      consumes:
+        - application/json
+      description: Create a new reservation for a resource.
+      parameters:
+        - description: Reservation Request
+          in: body
+          name: request
+          required: true
+          schema:
+            properties:
+              resourceId:
+                type: integer
+            type: object
+      produces:
+        - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            $ref: "#/definitions/internal_server_handlers.ClaimctlReservation"
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Create a reservation
+      tags:
+        - reservations
+  /reservations/{id}/activate:
+    patch:
+      consumes:
+        - application/json
+      description:
+        Activate a pending reservation. Only accessible by admin or resource
+        owner.
+      parameters:
+        - description: Reservation ID
+          in: path
+          name: id
+          required: true
+          type: integer
+      produces:
+        - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: "#/definitions/internal_server_handlers.ClaimctlReservation"
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Activate a reservation
+      tags:
+        - reservations
+  /reservations/{id}/cancel:
+    patch:
+      consumes:
+        - application/json
+      description: Cancel a pending or active reservation.
+      parameters:
+        - description: Reservation ID
+          in: path
+          name: id
+          required: true
+          type: integer
+      produces:
+        - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Cancel a reservation
+      tags:
+        - reservations
+  /reservations/{id}/complete:
+    patch:
+      consumes:
+        - application/json
+      description:
+        Complete an active reservation. Only accessible by reservation
+        owner or admin.
+      parameters:
+        - description: Reservation ID
+          in: path
+          name: id
+          required: true
+          type: integer
+      produces:
+        - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "403":
+          description: Forbidden
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Complete a reservation
+      tags:
+        - reservations
+  /reservations/timed:
+    post:
+      consumes:
+        - application/json
+      description: Create a new reservation for a resource with a specific duration.
+      parameters:
+        - description: Timed Reservation Request
+          in: body
+          name: request
+          required: true
+          schema:
+            properties:
+              duration:
+                type: string
+              resourceId:
+                type: integer
+            type: object
+      produces:
+        - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            $ref: "#/definitions/internal_server_handlers.ClaimctlReservation"
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Create a timed reservation
+      tags:
+        - reservations
+  /resources:
+    get:
+      consumes:
+        - application/json
+      description:
+        "Retrieve a list of all resources. Note: This might return all
+        resources regardless of permissions in the current implementation."
+      produces:
+        - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: "#/definitions/internal_server_handlers.ClaimctlResource"
+            type: array
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Get all resources
+      tags:
+        - resources
+    post:
+      consumes:
+        - application/json
+      description: Create a new resource. Requires admin privileges.
+      parameters:
+        - description: New Resource Details
+          in: body
+          name: resource
+          required: true
+          schema:
+            $ref: "#/definitions/claimctl_com_internal_db.CreateNewResourceParams"
+      produces:
+        - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: "#/definitions/internal_server_handlers.ClaimctlResource"
+        "403":
+          description: Forbidden
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Create a new resource
+      tags:
+        - resources
+  /resources/{id}:
+    delete:
+      consumes:
+        - application/json
+      description: Delete an existing resource. Requires admin privileges.
+      parameters:
+        - description: Resource ID
+          in: path
+          name: id
+          required: true
+          type: integer
+      produces:
+        - application/json
+      responses:
+        "200":
+          description: OK
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "403":
+          description: Forbidden
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Delete a resource
+      tags:
+        - resources
+    get:
+      consumes:
+        - application/json
+      description: Retrieve details of a specific resource by its ID.
+      parameters:
+        - description: Resource ID
+          in: path
+          name: id
+          required: true
+          type: integer
+      produces:
+        - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: "#/definitions/internal_server_handlers.ClaimctlResource"
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Get a resource by ID
+      tags:
+        - resources
+    patch:
+      consumes:
+        - application/json
+      description: Update details of an existing resource. Requires admin privileges.
+      parameters:
+        - description: Resource ID
+          in: path
+          name: id
+          required: true
+          type: integer
+        - description: Updated Resource Details
+          in: body
+          name: resource
+          required: true
+          schema:
+            $ref: "#/definitions/claimctl_com_internal_db.UpdateResourceByIdParams"
+      produces:
+        - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: "#/definitions/internal_server_handlers.ClaimctlResource"
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "403":
+          description: Forbidden
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Update a resource
+      tags:
+        - resources
+  /resources/{id}/with-status:
+    get:
+      consumes:
+        - application/json
+      description:
+        Retrieve details of a specific resource including its current reservation
+        status by its ID.
+      parameters:
+        - description: Resource ID
+          in: path
+          name: id
+          required: true
+          type: integer
+      produces:
+        - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: "#/definitions/claimctl_com_internal_services.ResourceWithStatus"
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Get a resource with status by ID
+      tags:
+        - resources
+  /resources/with-status:
+    get:
+      consumes:
+        - application/json
+      description:
+        Retrieve a list of all resources including their current reservation
+        status. Filtered by user permissions.
+      produces:
+        - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: "#/definitions/claimctl_com_internal_services.ResourceWithStatus"
+            type: array
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Get resources with status
+      tags:
+        - resources
+  /users:
+    get:
+      consumes:
+        - application/json
+      description: Retrieve a list of all users. Requires admin privileges.
+      produces:
+        - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: "#/definitions/internal_server_handlers.ClaimctlUser"
+            type: array
+        "403":
+          description: Forbidden
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Get all users
+      tags:
+        - users
+    post:
+      consumes:
+        - application/json
+      description: Create a new user account. Requires admin privileges.
+      parameters:
+        - description: New User Details
+          in: body
+          name: user
+          required: true
+          schema:
+            $ref: "#/definitions/internal_server_handlers.CreateUserParams"
+      produces:
+        - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            $ref: "#/definitions/internal_server_handlers.ClaimctlUser"
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "403":
+          description: Forbidden
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Create a new user
+      tags:
+        - users
+  /users/find:
+    get:
+      consumes:
+        - application/json
+      description: Retrieve a user by ID or email. Requires admin privileges.
+      parameters:
+        - description: User ID
+          in: query
+          name: id
+          type: integer
+        - description: User Email
+          in: query
+          name: email
+          type: string
+      produces:
+        - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: "#/definitions/internal_server_handlers.ClaimctlUser"
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "403":
+          description: Forbidden
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Get a user
+      tags:
+        - users
+swagger: "2.0"

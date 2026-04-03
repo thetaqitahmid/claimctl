@@ -1,0 +1,92 @@
+version: "3.8"
+
+services:
+  backend:
+    image: ghcr.io/taqitahmid/claimctl/backend:latest
+    ports:
+      - "3000:3000"
+    env_file:
+      - ./backend/.env
+    environment:
+      # We force these security settings on in production,
+      # overriding anything in the .env file.
+      - ENABLE_CSRF=true
+      - COOKIE_SECURE=true
+      - COOKIE_SAMESITE=Strict
+      - DB_HOST=db
+      - DB_PORT=5432
+    depends_on:
+      db:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:3000/v1/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    restart: always
+    networks:
+      - app-network
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 1G
+        reservations:
+          cpus: "0.25"
+          memory: 256M
+
+  frontend:
+    image: ghcr.io/taqitahmid/claimctl/frontend:latest
+    ports:
+      # We expose the frontend on standard port 80 instead of dev port 5173
+      - "80:8080"
+    environment:
+      - BACKEND_HOST=backend
+      - BACKEND_PORT=3000
+    depends_on:
+      backend:
+        condition: service_healthy
+    restart: always
+    networks:
+      - app-network
+    deploy:
+      resources:
+        limits:
+          cpus: "0.50"
+          memory: 512M
+        reservations:
+          cpus: "0.10"
+          memory: 128M
+
+  db:
+    image: postgres:18.1-alpine
+    env_file:
+      - ./backend/.env
+    environment:
+      # We automatically pull the credentials from the .env file
+      POSTGRES_USER: ${DB_USER:-claimctl}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-claimctl_pass}
+      POSTGRES_DB: ${DB_NAME:-claimctl}
+    volumes:
+      # Use a securely named volume for production data
+      - postgres_production_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: always
+    networks:
+      - app-network
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 1G
+
+networks:
+  app-network:
+    driver: bridge
+
+volumes:
+  postgres_production_data:

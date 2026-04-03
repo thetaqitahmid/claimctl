@@ -1,0 +1,61 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+    body {
+        @apply bg-slate-950 text-slate-200 antialiased;
+        font-family: 'Inter', system-ui, -apple-system, sans-serif;
+        color-scheme: dark;
+    }
+}
+
+@layer components {
+    .glass-panel {
+        @apply bg-slate-900/40 backdrop-blur-md border border-slate-800/50 shadow-xl;
+    }
+
+    .glass-card {
+        @apply bg-slate-800/30 backdrop-blur-sm border border-slate-700/30 hover:border-slate-600/50 transition-all duration-300;
+    }
+
+    .btn-primary {
+        @apply px-4 py-2 bg-cyan-500/20 hover:bg-cyan-500/30 text-cyan-500 border border-cyan-500/30 rounded-lg transition-all duration-200 flex items-center justify-center gap-2 font-medium;
+    }
+
+    .btn-ghost {
+        @apply px-4 py-2 bg-slate-800/50 hover:bg-slate-700 text-slate-300 border border-slate-700 rounded-lg transition-all duration-200 flex items-center justify-center gap-2 font-medium;
+    }
+
+    .badge {
+        @apply px-2.5 py-0.5 rounded-full text-xs font-semibold uppercase tracking-wider border;
+    }
+
+    .badge-available {
+        @apply bg-brand-available/10 text-brand-available border-brand-available/20;
+    }
+
+    .badge-busy {
+        @apply bg-brand-busy/10 text-brand-busy border-brand-busy/20;
+    }
+
+    .badge-queued {
+        @apply bg-brand-queued/10 text-brand-queued border-brand-queued/20;
+    }
+
+    .badge-healthy {
+        @apply bg-green-500/10 text-green-500 border-green-500/20;
+    }
+
+    .badge-degraded {
+        @apply bg-yellow-500/10 text-yellow-500 border-yellow-500/20;
+    }
+
+    .badge-down {
+        @apply bg-red-500/10 text-red-500 border-red-500/20;
+    }
+
+    .badge-unknown {
+        @apply bg-slate-500/10 text-slate-500 border-slate-500/20;
+    }
+}

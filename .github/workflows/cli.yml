@@ -1,0 +1,51 @@
+name: CLI Pipeline
+
+on:
+  push:
+    branches: ["*"]
+    paths:
+      - "cli/**"
+      - ".github/workflows/cli.yml"
+  pull_request:
+    paths:
+      - "cli/**"
+      - ".github/workflows/cli.yml"
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.25"
+
+      - name: Build
+        run: |
+          echo "Building the CLI..."
+          cd cli
+          go build -o claimctl-cli main.go
+
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.25"
+
+      - name: Vet
+        run: |
+          cd cli
+          go vet ./...
+
+      - name: Test
+        run: |
+          echo "Testing the CLI..."
+          cd cli
+          go test ./...

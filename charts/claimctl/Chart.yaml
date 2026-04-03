@@ -1,0 +1,22 @@
+apiVersion: v2
+name: claimctl
+description: A Helm chart for claimctl application
+type: application
+version: 0.1.0
+appVersion: "0.1.0"
+
+dependencies:
+  - name: postgres
+    version: 1.6.1
+    repository: https://groundhog2k.github.io/helm-charts/
+    condition: postgres.enabled
+
+home: https://github.com/taqitahmid/claimctl
+sources:
+  - https://github.com/taqitahmid/claimctl
+maintainers:
+  - name: Taqi Tahmid
+    email: taqi.tahmid@example.com
+keywords:
+  - reservation
+  - resource-management

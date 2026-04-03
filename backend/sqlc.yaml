@@ -1,0 +1,33 @@
+version: "2"
+sql:
+  - engine: "postgresql"
+    queries: "./sql/queries"
+    schema: "./migrations"
+    gen:
+      go:
+        package: "db"
+        out: "./internal/db"
+        emit_interface: true
+        sql_package: "pgx/v5"
+        emit_json_tags: true
+        json_tags_case_style: camel
+        overrides:
+          - db_type: uuid
+            go_type:
+              import: "github.com/google/uuid"
+              type: "UUID"
+          - column: "claimctl.resources.labels"
+            go_type:
+              import: "github.com/thetaqitahmid/claimctl/internal/types"
+              package: "types"
+              type: "JSONBArray"
+          - column: "claimctl.reservation_history.details"
+            go_type:
+              import: "github.com/thetaqitahmid/claimctl/internal/types"
+              package: "types"
+              type: "JSONB"
+          - column: "claimctl.resources.properties"
+            go_type:
+              import: "github.com/thetaqitahmid/claimctl/internal/types"
+              package: "types"
+              type: "JSONBMap"

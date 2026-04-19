@@ -53,7 +53,7 @@ func TestResourcesCommand_Structure(t *testing.T) {
 
 	// Check subcommands
 	subcommands := resourcesCmd.Commands()
-	assert.Len(t, subcommands, 4, "Should have exactly 4 subcommands")
+	assert.Len(t, subcommands, 6, "Should have exactly 6 subcommands")
 
 	// Extract just the command name (before any arguments)
 	commandNames := make([]string, len(subcommands))
@@ -222,7 +222,7 @@ func TestResourcesCommandInitialization(t *testing.T) {
 
 	// Test that subcommands are added to resources
 	resourceCommands := resourcesCmd.Commands()
-	assert.Len(t, resourceCommands, 4)
+	assert.Len(t, resourceCommands, 6)
 }
 
 func TestCommandExecutionSetup(t *testing.T) {

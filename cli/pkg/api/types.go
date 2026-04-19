@@ -183,3 +183,94 @@ type HealthConfigRequest struct {
 	TimeoutSeconds  int32  `json:"timeoutSeconds"`
 	RetryCount      int32  `json:"retryCount"`
 }
+
+// Space represents a logical grouping of resources.
+type Space struct {
+	ID          string `json:"id"`
+	Name        string `json:"name"`
+	Description string `json:"description"`
+	CreatedAt   int64  `json:"createdAt"`
+	UpdatedAt   int64  `json:"updatedAt"`
+}
+
+// Group represents an access control group.
+type Group struct {
+	ID          string `json:"id"`
+	Name        string `json:"name"`
+	Description string `json:"description"`
+	CreatedAt   int64  `json:"createdAt"`
+	UpdatedAt   int64  `json:"updatedAt"`
+}
+
+// GroupMember represents a user in a group.
+type GroupMember struct {
+	UserID    string `json:"userId"`
+	Name      string `json:"name"`
+	Email     string `json:"email"`
+	Role      string `json:"role"`
+	CreatedAt int64  `json:"createdAt"`
+}
+
+// APIToken represents an API token record.
+type APIToken struct {
+	ID        string  `json:"id"`
+	Name      string  `json:"name"`
+	CreatedAt int64   `json:"createdAt"`
+	ExpiresAt *int64  `json:"expiresAt,omitempty"`
+}
+
+// GenerateTokenResponse is returned when a token is created.
+type GenerateTokenResponse struct {
+	Token     string  `json:"token"`
+	ID        string  `json:"id"`
+	Name      string  `json:"name"`
+	CreatedAt int64   `json:"createdAt"`
+	ExpiresAt *int64  `json:"expiresAt,omitempty"`
+}
+
+// AuditLog represents a single audit log entry.
+type AuditLog struct {
+	ID         string `json:"id"`
+	ActorID    string `json:"actorId"`
+	ActorEmail string `json:"actorEmail"`
+	Action     string `json:"action"`
+	EntityType string `json:"entityType"`
+	EntityID   string `json:"entityId"`
+	Details    any    `json:"details"`
+	IPAddress  string `json:"ipAddress"`
+	CreatedAt  int64  `json:"createdAt"`
+}
+
+// ReservationHistory represents a single reservation history entry.
+type ReservationHistory struct {
+	ID           string `json:"id"`
+	ResourceID   string `json:"resourceId"`
+	ResourceName string `json:"resourceName"`
+	ReservationID *string `json:"reservationId"`
+	Action       string `json:"action"`
+	Timestamp    int64  `json:"timestamp"`
+	Details      string `json:"details"`
+	UserName     string `json:"userName,omitempty"`
+}
+
+// MaintenanceHistory represents a single maintenance history entry.
+type MaintenanceHistory struct {
+	ID            string `json:"id"`
+	ResourceID    string `json:"resourceId"`
+	PreviousState bool   `json:"previousState"`
+	NewState      bool   `json:"newState"`
+	ChangedBy     string `json:"changedBy"`
+	ChangedByEmail string `json:"changedByEmail"`
+	ChangedAt     int64  `json:"changedAt"`
+	Reason        string `json:"reason,omitempty"`
+}
+
+// UpdateWebhookRequest is the payload for updating a webhook.
+type UpdateWebhookRequest struct {
+	Name        string            `json:"name"`
+	Url         string            `json:"url"`
+	Method      string            `json:"method"`
+	Headers     map[string]string `json:"headers"`
+	Template    string            `json:"template"`
+	Description string            `json:"description"`
+}

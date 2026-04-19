@@ -226,6 +226,53 @@ var deleteWebhookCmd = &cobra.Command{
 	},
 }
 
+// updateWebhookCmd
+var updateWebhookCmd = &cobra.Command{
+	Use:   "update [id]",
+	Short: "Update an existing webhook",
+	Args:  cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		client, err := api.NewClient(viper.GetString("url"), viper.GetString("token"), viper.GetBool("netrc"))
+		if err != nil {
+			return fmt.Errorf("error creating client: %w", err)
+		}
+
+		headerMap := make(map[string]string)
+		for _, h := range webhookHeaders {
+			parts := strings.SplitN(h, ":", 2)
+			if len(parts) == 2 {
+				headerMap[strings.TrimSpace(parts[0])] = strings.TrimSpace(parts[1])
+			}
+		}
+
+		req := api.UpdateWebhookRequest{
+			Name:        webhookName,
+			Url:         webhookUrl,
+			Method:      webhookMethod,
+			Headers:     headerMap,
+			Template:    webhookTemplate,
+			Description: webhookDescription,
+		}
+
+		wbk, err := client.UpdateWebhook(args[0], req)
+		if err != nil {
+			return fmt.Errorf("error updating webhook: %w", err)
+		}
+
+		if viper.GetBool("json") {
+			data, err := json.MarshalIndent(wbk, "", "  ")
+			if err != nil {
+				return fmt.Errorf("error marshalling to JSON: %w", err)
+			}
+			fmt.Println(string(data))
+			return nil
+		}
+
+		fmt.Printf("Webhook %s updated successfully\n", wbk.ID)
+		return nil
+	},
+}
+
 // attachWebhookCmd
 var attachWebhookCmd = &cobra.Command{
 	Use:   "attach [resource-id] [webhook-id]",
@@ -296,6 +343,7 @@ func init() {
 	rootCmd.AddCommand(webhooksCmd)
 	webhooksCmd.AddCommand(listWebhooksCmd)
 	webhooksCmd.AddCommand(createWebhookCmd)
+	webhooksCmd.AddCommand(updateWebhookCmd)
 	webhooksCmd.AddCommand(deleteWebhookCmd)
 	webhooksCmd.AddCommand(attachWebhookCmd)
 	webhooksCmd.AddCommand(detachWebhookCmd)
@@ -311,4 +359,11 @@ func init() {
 	// We need to handle validation manually in Run logic now
 
 	attachWebhookCmd.Flags().StringVar(&webhookEvents, "events", "", "Comma-separated list of events")
+
+	updateWebhookCmd.Flags().StringVar(&webhookName, "name", "", "Webhook Name")
+	updateWebhookCmd.Flags().StringVar(&webhookUrl, "url", "", "Webhook URL")
+	updateWebhookCmd.Flags().StringVar(&webhookMethod, "method", "", "HTTP Method")
+	updateWebhookCmd.Flags().StringSliceVar(&webhookHeaders, "header", []string{}, "HTTP Headers (key:value)")
+	updateWebhookCmd.Flags().StringVar(&webhookTemplate, "template", "", "Payload Template")
+	updateWebhookCmd.Flags().StringVar(&webhookDescription, "desc", "", "Description")
 }

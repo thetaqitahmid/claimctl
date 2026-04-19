@@ -6,6 +6,7 @@ import (
 	"os"
 	"strings"
 	"text/tabwriter"
+	"time"
 
 	"claimctl-cli/pkg/api"
 
@@ -279,13 +280,158 @@ Example:
 	},
 }
 
+var resourceHistoryCmd = &cobra.Command{
+	Use:   "history [resource-id]",
+	Short: "View reservation history for a resource",
+	Args:  cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		client, err := api.NewClient(viper.GetString("url"), viper.GetString("token"), viper.GetBool("netrc"))
+		if err != nil {
+			return fmt.Errorf("error creating client: %w", err)
+		}
+
+		history, err := client.GetResourceHistory(args[0])
+		if err != nil {
+			return fmt.Errorf("error fetching resource history: %w", err)
+		}
+
+		if len(history) == 0 {
+			fmt.Println("No history found for this resource.")
+			return nil
+		}
+
+		if viper.GetBool("json") {
+			data, err := json.MarshalIndent(history, "", "  ")
+			if err != nil {
+				return fmt.Errorf("error marshalling to JSON: %w", err)
+			}
+			fmt.Println(string(data))
+			return nil
+		}
+
+		w := tabwriter.NewWriter(os.Stdout, 0, 0, 3, ' ', 0)
+		fmt.Fprintln(w, "TIME\tUSER\tACTION\tDETAILS")
+		for _, h := range history {
+			fmt.Fprintf(w, "%s\t%s\t%s\t%s\n",
+				time.Unix(h.Timestamp, 0).Format("2006-01-02 15:04"),
+				h.UserName,
+				h.Action,
+				h.Details,
+			)
+		}
+		w.Flush()
+		return nil
+	},
+}
+
+var maintenanceCmd = &cobra.Command{
+	Use:   "maintenance",
+	Short: "Manage maintenance mode for a resource",
+}
+
+var maintenanceReason string
+
+var maintenanceEnableCmd = &cobra.Command{
+	Use:   "enable [resource-id]",
+	Short: "Put a resource into maintenance mode",
+	Args:  cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		client, err := api.NewClient(viper.GetString("url"), viper.GetString("token"), viper.GetBool("netrc"))
+		if err != nil {
+			return fmt.Errorf("error creating client: %w", err)
+		}
+
+		if err := client.SetMaintenance(args[0], true, maintenanceReason); err != nil {
+			return fmt.Errorf("error enabling maintenance mode: %w", err)
+		}
+
+		if !viper.GetBool("json") {
+			fmt.Printf("Resource %s is now in maintenance mode\n", args[0])
+		}
+		return nil
+	},
+}
+
+var maintenanceDisableCmd = &cobra.Command{
+	Use:   "disable [resource-id]",
+	Short: "Take a resource out of maintenance mode",
+	Args:  cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		client, err := api.NewClient(viper.GetString("url"), viper.GetString("token"), viper.GetBool("netrc"))
+		if err != nil {
+			return fmt.Errorf("error creating client: %w", err)
+		}
+
+		if err := client.SetMaintenance(args[0], false, ""); err != nil {
+			return fmt.Errorf("error disabling maintenance mode: %w", err)
+		}
+
+		if !viper.GetBool("json") {
+			fmt.Printf("Resource %s is no longer in maintenance mode\n", args[0])
+		}
+		return nil
+	},
+}
+
+var maintenanceHistoryCmd = &cobra.Command{
+	Use:   "history [resource-id]",
+	Short: "View maintenance history for a resource",
+	Args:  cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		client, err := api.NewClient(viper.GetString("url"), viper.GetString("token"), viper.GetBool("netrc"))
+		if err != nil {
+			return fmt.Errorf("error creating client: %w", err)
+		}
+
+		history, err := client.GetMaintenanceHistory(args[0])
+		if err != nil {
+			return fmt.Errorf("error fetching maintenance history: %w", err)
+		}
+
+		if len(history) == 0 {
+			fmt.Println("No maintenance history found.")
+			return nil
+		}
+
+		if viper.GetBool("json") {
+			data, err := json.MarshalIndent(history, "", "  ")
+			if err != nil {
+				return fmt.Errorf("error marshalling to JSON: %w", err)
+			}
+			fmt.Println(string(data))
+			return nil
+		}
+
+		w := tabwriter.NewWriter(os.Stdout, 0, 0, 3, ' ', 0)
+		fmt.Fprintln(w, "TIME\tCHANGED BY\tSTATE\tREASON")
+		for _, h := range history {
+			state := "disabled"
+			if h.NewState {
+				state = "enabled"
+			}
+			fmt.Fprintf(w, "%s\t%s\t%s\t%s\n",
+				time.Unix(h.ChangedAt, 0).Format("2006-01-02 15:04"),
+				h.ChangedByEmail,
+				state,
+				h.Reason,
+			)
+		}
+		w.Flush()
+		return nil
+	},
+}
+
 func init() {
 	rootCmd.AddCommand(resourcesCmd)
 	resourcesCmd.AddCommand(listResourcesCmd)
 	resourcesCmd.AddCommand(createResourceCmd)
 	resourcesCmd.AddCommand(updateResourceCmd)
 	resourcesCmd.AddCommand(deleteResourceCmd)
-
+	resourcesCmd.AddCommand(resourceHistoryCmd)
+	resourcesCmd.AddCommand(maintenanceCmd)
+	maintenanceCmd.AddCommand(maintenanceEnableCmd)
+	maintenanceCmd.AddCommand(maintenanceDisableCmd)
+	maintenanceCmd.AddCommand(maintenanceHistoryCmd)
 	listResourcesCmd.Flags().StringVar(&filterType, "type", "", "Filter resources by type")
 	listResourcesCmd.Flags().StringVar(&filterLabelExpr, "label-expr", "", "Filter resources using a boolean label expression (e.g. 'dev AND ubuntu')")
 
@@ -299,4 +445,6 @@ func init() {
 	updateResourceCmd.Flags().StringVar(&updateType, "type", "", "New Resource Type")
 	updateResourceCmd.Flags().StringSliceVar(&updateLabels, "label", []string{}, "New Resource Labels")
 	updateResourceCmd.Flags().StringToStringVar(&updateProperties, "property", nil, "Resource Properties to add/update (key=value)")
+
+	maintenanceEnableCmd.Flags().StringVar(&maintenanceReason, "reason", "", "Reason for maintenance")
 }

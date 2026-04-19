@@ -20,28 +20,38 @@ tracked and managed collaboratively.
   types.
 - **Reserve and Release Resources**: Easily book resources when needed and
   release them after use.
-- **Filter Resources by Category**: Find specific types of resources with
-  filters to improve search efficiency.
-- **Search by Keyword**: Quickly locate resources based on name or type using
-  search functionality.
+- **Advanced Resource Filtering**: Efficiently find resources by type, tags,
+  labels, or keyword search within the data table.
+- **Resource Organization (Spaces)**: Logically organize resources into
+  distinct spaces for easier management.
+- **Access Control Groups**: Manage user access and permissions through
+  configurable groups.
 - **Detailed Resource View**: Access detailed information about each resource,
   including its name, type, status, and labels.
 - **Track Reservation Status**: Monitor who currently has reserved a resource,
   along with easy-to-use Reserve and Release buttons.
-- **Authentication and User Management**: Allow user authentication and access
+- **Authentication and User Management**: Allow user authentication and access-
   based resource management.
 - **Resource History**: View previous reservation history to better manage high-
   demand resources with detailed audit trails.
+- **Maintenance Mode**: Place resources in maintenance mode to prevent new
+  reservations during repairs or updates.
 - **Timed Reservations**: Reserve resources for specific durations (1hr, 2hr,
   4hr, or custom) with automatic expiry.
 - **Queue System**: Automatic queue management for busy resources with first-
   come-first-served ordering.
 - **Real-Time Updates**: Live reservation status updates via Server-Sent Events
   (SSE) for instant notifications.
+- **Multi-channel Notifications**: Support for dispatching notifications via
+  Email, Slack, and Microsoft Teams.
 - **Webhook Integration**: Automate workflows by triggering webhooks on
   reservation events (create, activate, complete, cancel).
 - **Secret Management**: Securely store API keys and tokens for webhook
   integrations with encrypted storage.
+- **Comprehensive Audit Logging**: Track system actions, configuration changes,
+  and user behavior for accountability.
+- **System Backup & Restore**: Built-in database backup and restore
+  capabilities for administrators.
 - **Multiple Authentication Methods**: Support for local auth, LDAP, and OpenID
   Connect (OIDC) for enterprise SSO.
 - **Command-Line Interface**: Full-featured CLI (`claimctl`) for
@@ -129,21 +139,38 @@ claimctl includes a powerful CLI for automation and scripting:
 ```bash
 # Reserve a resource by ID or criteria
 claimctl reserve 123 --duration 2h
-claimctl reserve --type "Desk" --label "dual-monitor"
+claimctl reserve --type "Desk" --label-expr "dual-monitor"
+
+# Wait in queue for a busy resource
+claimctl reserve 123 --wait --timeout 600
 
 # List and manage resources
 claimctl resources list --type "Meeting Room"
 claimctl resources create --name "Lab 1" --type "Lab"
+claimctl resources history <resource-id>
+claimctl resources maintenance enable <resource-id> --reason "Upgrade"
+
+# Spaces and groups (admin)
+claimctl spaces list
+claimctl groups create --name "DevOps"
+claimctl groups add-member <group-id> <user-id>
+
+# API tokens
+claimctl tokens generate --name "CI Pipeline" --expires-in 30d
+claimctl tokens list
 
 # Webhook management
 claimctl webhooks list
+claimctl webhooks update <webhook-id> --name "Slack Prod"
 claimctl webhooks attach <resource-id> <webhook-id>
 
 # Health check management
-claimctl healthcheck config <resource-id> --type http --target
-"https://example.com"
+claimctl healthcheck config <resource-id> --type http --target "https://example.com"
 claimctl healthcheck status <resource-id>
 claimctl healthcheck history <resource-id> --limit 20
+
+# Audit logs (admin)
+claimctl audit-logs --limit 100
 ```
 
 See [CLI Reference](docs/CLI.md) for complete CLI documentation.

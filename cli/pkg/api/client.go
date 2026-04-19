@@ -406,7 +406,7 @@ func (c *Client) GetHealthHistory(resourceID string, limit int32) ([]HealthStatu
 }
 
 func (c *Client) TriggerHealthCheck(resourceID string) error {
-	_, err := c.request("POST", fmt.Sprintf("/api/resources/%s/health/trigger", resourceID), nil)
+	_, err := c.request("POST", fmt.Sprintf("/api/resources/%s/health/check", resourceID), nil)
 	return err
 }
 
@@ -464,6 +464,228 @@ func (c *Client) WaitForReservation(id string, timeout, interval int, progressFn
 	}
 
 	return fmt.Errorf("timeout waiting for reservation to become active")
+}
+
+// Space Methods
+
+func (c *Client) ListSpaces() ([]Space, error) {
+	resp, err := c.request("GET", "/api/spaces", nil)
+	if err != nil {
+		return nil, err
+	}
+	var spaces []Space
+	if err := json.Unmarshal(resp, &spaces); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal spaces: %w", err)
+	}
+	return spaces, nil
+}
+
+func (c *Client) CreateSpace(name, description string) (*Space, error) {
+	req := map[string]string{"name": name, "description": description}
+	resp, err := c.request("POST", "/api/spaces", req)
+	if err != nil {
+		return nil, err
+	}
+	var space Space
+	if err := json.Unmarshal(resp, &space); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal space: %w", err)
+	}
+	return &space, nil
+}
+
+func (c *Client) UpdateSpace(id, name, description string) (*Space, error) {
+	req := map[string]string{"name": name, "description": description}
+	resp, err := c.request("PATCH", fmt.Sprintf("/api/spaces/%s", id), req)
+	if err != nil {
+		return nil, err
+	}
+	var space Space
+	if err := json.Unmarshal(resp, &space); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal space: %w", err)
+	}
+	return &space, nil
+}
+
+func (c *Client) DeleteSpace(id string) error {
+	_, err := c.request("DELETE", fmt.Sprintf("/api/spaces/%s", id), nil)
+	return err
+}
+
+// Group Methods
+
+func (c *Client) ListGroups() ([]Group, error) {
+	resp, err := c.request("GET", "/api/groups", nil)
+	if err != nil {
+		return nil, err
+	}
+	var groups []Group
+	if err := json.Unmarshal(resp, &groups); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal groups: %w", err)
+	}
+	return groups, nil
+}
+
+func (c *Client) CreateGroup(name, description string) (*Group, error) {
+	req := map[string]string{"name": name, "description": description}
+	resp, err := c.request("POST", "/api/groups", req)
+	if err != nil {
+		return nil, err
+	}
+	var group Group
+	if err := json.Unmarshal(resp, &group); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal group: %w", err)
+	}
+	return &group, nil
+}
+
+func (c *Client) UpdateGroup(id, name, description string) (*Group, error) {
+	req := map[string]string{"name": name, "description": description}
+	resp, err := c.request("PUT", fmt.Sprintf("/api/groups/%s", id), req)
+	if err != nil {
+		return nil, err
+	}
+	var group Group
+	if err := json.Unmarshal(resp, &group); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal group: %w", err)
+	}
+	return &group, nil
+}
+
+func (c *Client) DeleteGroup(id string) error {
+	_, err := c.request("DELETE", fmt.Sprintf("/api/groups/%s", id), nil)
+	return err
+}
+
+func (c *Client) ListGroupMembers(groupID string) ([]GroupMember, error) {
+	resp, err := c.request("GET", fmt.Sprintf("/api/groups/%s/members", groupID), nil)
+	if err != nil {
+		return nil, err
+	}
+	var members []GroupMember
+	if err := json.Unmarshal(resp, &members); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal group members: %w", err)
+	}
+	return members, nil
+}
+
+func (c *Client) AddGroupMember(groupID, userID string) error {
+	req := map[string]string{"userId": userID}
+	_, err := c.request("POST", fmt.Sprintf("/api/groups/%s/members", groupID), req)
+	return err
+}
+
+func (c *Client) RemoveGroupMember(groupID, userID string) error {
+	_, err := c.request("DELETE", fmt.Sprintf("/api/groups/%s/members/%s", groupID, userID), nil)
+	return err
+}
+
+// Token Methods
+
+func (c *Client) ListTokens() ([]APIToken, error) {
+	resp, err := c.request("GET", "/api/tokens", nil)
+	if err != nil {
+		return nil, err
+	}
+	var tokens []APIToken
+	if err := json.Unmarshal(resp, &tokens); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal tokens: %w", err)
+	}
+	return tokens, nil
+}
+
+func (c *Client) GenerateToken(name, expiresIn string) (*GenerateTokenResponse, error) {
+	req := map[string]string{"name": name}
+	if expiresIn != "" {
+		req["expires_in"] = expiresIn
+	}
+	resp, err := c.request("POST", "/api/tokens", req)
+	if err != nil {
+		return nil, err
+	}
+	var token GenerateTokenResponse
+	if err := json.Unmarshal(resp, &token); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal token: %w", err)
+	}
+	return &token, nil
+}
+
+func (c *Client) RevokeToken(id string) error {
+	_, err := c.request("DELETE", fmt.Sprintf("/api/tokens/%s", id), nil)
+	return err
+}
+
+// Audit Log Methods
+
+func (c *Client) GetAuditLogs(limit, offset int) ([]AuditLog, error) {
+	path := fmt.Sprintf("/api/admin/audit-logs?limit=%d&offset=%d", limit, offset)
+	resp, err := c.request("GET", path, nil)
+	if err != nil {
+		return nil, err
+	}
+	var logs []AuditLog
+	if err := json.Unmarshal(resp, &logs); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal audit logs: %w", err)
+	}
+	return logs, nil
+}
+
+// History Methods
+
+func (c *Client) GetUserHistory() ([]ReservationHistory, error) {
+	resp, err := c.request("GET", "/api/me/history", nil)
+	if err != nil {
+		return nil, err
+	}
+	var history []ReservationHistory
+	if err := json.Unmarshal(resp, &history); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal history: %w", err)
+	}
+	return history, nil
+}
+
+func (c *Client) GetResourceHistory(resourceID string) ([]ReservationHistory, error) {
+	resp, err := c.request("GET", fmt.Sprintf("/api/resources/%s/history", resourceID), nil)
+	if err != nil {
+		return nil, err
+	}
+	var history []ReservationHistory
+	if err := json.Unmarshal(resp, &history); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal resource history: %w", err)
+	}
+	return history, nil
+}
+
+// Maintenance Methods
+
+func (c *Client) SetMaintenance(resourceID string, enabled bool, reason string) error {
+	req := map[string]interface{}{"is_under_maintenance": enabled, "reason": reason}
+	_, err := c.request("PUT", fmt.Sprintf("/api/resources/%s/maintenance", resourceID), req)
+	return err
+}
+
+func (c *Client) GetMaintenanceHistory(resourceID string) ([]MaintenanceHistory, error) {
+	resp, err := c.request("GET", fmt.Sprintf("/api/resources/%s/maintenance/history", resourceID), nil)
+	if err != nil {
+		return nil, err
+	}
+	var history []MaintenanceHistory
+	if err := json.Unmarshal(resp, &history); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal maintenance history: %w", err)
+	}
+	return history, nil
+}
+
+// UpdateWebhook updates an existing webhook.
+func (c *Client) UpdateWebhook(id string, req UpdateWebhookRequest) (*Webhook, error) {
+	resp, err := c.request("PUT", fmt.Sprintf("/api/webhooks/%s", id), req)
+	if err != nil {
+		return nil, err
+	}
+	var webhook Webhook
+	if err := json.Unmarshal(resp, &webhook); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal webhook: %w", err)
+	}
+	return &webhook, nil
 }
 
 // Backup Methods

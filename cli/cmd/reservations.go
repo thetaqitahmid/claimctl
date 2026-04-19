@@ -186,11 +186,55 @@ var reservationsWaitCmd = &cobra.Command{
 	},
 }
 
+var reservationsHistoryCmd = &cobra.Command{
+	Use:   "history",
+	Short: "View your reservation history",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		client, err := api.NewClient(viper.GetString("url"), viper.GetString("token"), viper.GetBool("netrc"))
+		if err != nil {
+			return fmt.Errorf("error creating client: %w", err)
+		}
+
+		history, err := client.GetUserHistory()
+		if err != nil {
+			return fmt.Errorf("error fetching history: %w", err)
+		}
+
+		if len(history) == 0 {
+			fmt.Println("No reservation history found.")
+			return nil
+		}
+
+		if viper.GetBool("json") {
+			data, err := json.MarshalIndent(history, "", "  ")
+			if err != nil {
+				return fmt.Errorf("error marshalling to JSON: %w", err)
+			}
+			fmt.Println(string(data))
+			return nil
+		}
+
+		w := tabwriter.NewWriter(os.Stdout, 0, 0, 3, ' ', 0)
+		fmt.Fprintln(w, "TIME\tRESOURCE\tACTION\tDETAILS")
+		for _, h := range history {
+			fmt.Fprintf(w, "%s\t%s\t%s\t%s\n",
+				time.Unix(h.Timestamp, 0).Format("2006-01-02 15:04"),
+				h.ResourceName,
+				h.Action,
+				h.Details,
+			)
+		}
+		w.Flush()
+		return nil
+	},
+}
+
 func init() {
 	rootCmd.AddCommand(reservationsCmd)
 	reservationsCmd.AddCommand(reservationsListCmd)
 	reservationsCmd.AddCommand(reservationsStatusCmd)
 	reservationsCmd.AddCommand(reservationsWaitCmd)
+	reservationsCmd.AddCommand(reservationsHistoryCmd)
 
 	reservationsWaitCmd.Flags().IntVar(&waitTimeout, "timeout", 300, "Timeout in seconds (default: 300)")
 	reservationsWaitCmd.Flags().IntVar(&waitPollInterval, "poll-interval", 5, "Polling interval in seconds (default: 5)")

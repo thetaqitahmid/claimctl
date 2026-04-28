@@ -63,7 +63,7 @@ func (h *UserHandler) generateJWT(userID uuid.UUID, email string, name string, r
 		Role:   role,
 		Status: status,
 		RegisteredClaims: jwt.RegisteredClaims{
-			ExpiresAt: jwt.NewNumericDate(time.Now().Add(24 * time.Hour)),
+			ExpiresAt: jwt.NewNumericDate(time.Now().Add(8 * time.Hour)),
 			IssuedAt:  jwt.NewNumericDate(time.Now()),
 			Issuer:    "claimctl",
 		},

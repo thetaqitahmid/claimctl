@@ -1,4 +1,5 @@
-import { createApi, fetchBaseQuery } from '@reduxjs/toolkit/query/react';
+import { createApi } from '@reduxjs/toolkit/query/react';
+import { baseQueryWithReauth } from './baseQuery';
 
 export interface AppSetting {
   key: string;
@@ -10,16 +11,7 @@ export interface AppSetting {
 
 export const settingsApi = createApi({
   reducerPath: 'settingsApi',
-  baseQuery: fetchBaseQuery({
-    baseUrl: '/api',
-    prepareHeaders: (headers) => {
-      // Assuming headers are handled globally or via proxy, but if JWT is in cookie, we rely on browser.
-      // If we needed to attach token:
-      // const token = (getState() as RootState).auth.token;
-      // if (token) headers.set('authorization', `Bearer ${token}`);
-      return headers;
-    },
-  }),
+  baseQuery: baseQueryWithReauth,
   tagTypes: ['Settings'],
   endpoints: (builder) => ({
     getSettings: builder.query<AppSetting[], void>({

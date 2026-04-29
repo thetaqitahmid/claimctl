@@ -1,6 +1,6 @@
-import { createApi, fetchBaseQuery } from "@reduxjs/toolkit/query/react";
+import { createApi } from "@reduxjs/toolkit/query/react";
 import { clearCredentials, setCredentials } from "../slices/authSlice";
-import { BACKEND_URL } from "../../config";
+import { baseQueryWithReauth } from "./baseQuery";
 
 interface credentialType {
   email: string;
@@ -35,10 +35,7 @@ interface authResponse {
 export const authApiSlice = createApi({
   reducerPath: "auth",
   tagTypes: ["User"],
-  baseQuery: fetchBaseQuery({
-    baseUrl: `${BACKEND_URL}/api`,
-    credentials: "include",
-  }),
+  baseQuery: baseQueryWithReauth,
   endpoints: (builder) => ({
     login: builder.mutation<authResponse, credentialType>({
       query: (credentials: credentialType) => ({

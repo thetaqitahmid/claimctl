@@ -30,14 +30,17 @@ type Querier interface {
 	CreateGroup(ctx context.Context, arg CreateGroupParams) (ClaimctlGroup, error)
 	CreateHealthStatus(ctx context.Context, arg CreateHealthStatusParams) (ClaimctlResourceHealthStatus, error)
 	CreateNewResource(ctx context.Context, arg CreateNewResourceParams) (ClaimctlResource, error)
+	CreateRefreshToken(ctx context.Context, arg CreateRefreshTokenParams) (ClaimctlRefreshToken, error)
 	CreateReservation(ctx context.Context, arg CreateReservationParams) (ClaimctlReservation, error)
 	CreateSecret(ctx context.Context, arg CreateSecretParams) (ClaimctlSecret, error)
 	CreateSpace(ctx context.Context, arg CreateSpaceParams) (ClaimctlSpace, error)
 	CreateUser(ctx context.Context, arg CreateUserParams) error
 	CreateWebhook(ctx context.Context, arg CreateWebhookParams) (ClaimctlWebhook, error)
 	CreateWebhookLog(ctx context.Context, arg CreateWebhookLogParams) (ClaimctlWebhookLog, error)
+	DeleteExpiredRefreshTokens(ctx context.Context) error
 	DeleteGroup(ctx context.Context, id uuid.UUID) error
 	DeleteHealthConfig(ctx context.Context, resourceID uuid.UUID) error
+	DeleteRefreshToken(ctx context.Context, tokenHash string) error
 	DeleteResourceById(ctx context.Context, id uuid.UUID) error
 	DeleteSecret(ctx context.Context, id uuid.UUID) error
 	DeleteSpace(ctx context.Context, id uuid.UUID) error
@@ -74,6 +77,7 @@ type Querier interface {
 	GetPasswordById(ctx context.Context, id uuid.UUID) (string, error)
 	GetQueueForResource(ctx context.Context, resourceID uuid.UUID) ([]GetQueueForResourceRow, error)
 	GetRecentHistoryByAction(ctx context.Context, arg GetRecentHistoryByActionParams) ([]GetRecentHistoryByActionRow, error)
+	GetRefreshTokenByHash(ctx context.Context, tokenHash string) (ClaimctlRefreshToken, error)
 	GetReservationHistory(ctx context.Context, reservationID pgtype.UUID) ([]GetReservationHistoryRow, error)
 	GetResourceMaintenanceStatus(ctx context.Context, id uuid.UUID) (pgtype.Bool, error)
 	GetResourceName(ctx context.Context, id uuid.UUID) (string, error)
@@ -113,6 +117,8 @@ type Querier interface {
 	RemoveUserFromGroup(ctx context.Context, arg RemoveUserFromGroupParams) error
 	ResetUserFailedLoginAttempts(ctx context.Context, id uuid.UUID) error
 	RevokeAPIToken(ctx context.Context, arg RevokeAPITokenParams) error
+	RevokeAllUserRefreshTokens(ctx context.Context, userID uuid.UUID) error
+	RevokeRefreshTokenFamily(ctx context.Context, familyID uuid.UUID) error
 	SetResourceMaintenanceMode(ctx context.Context, arg SetResourceMaintenanceModeParams) (ClaimctlResource, error)
 	UpdateAPITokenLastUsed(ctx context.Context, id uuid.UUID) error
 	UpdateGroup(ctx context.Context, arg UpdateGroupParams) (ClaimctlGroup, error)

@@ -38,18 +38,20 @@ type Claims struct {
 }
 
 type UserHandler struct {
-	userService     services.UserService
-	settingsService *services.SettingsService
-	privateKey      *rsa.PrivateKey
-	auditService    services.AuditService
+	userService          services.UserService
+	settingsService      *services.SettingsService
+	privateKey           *rsa.PrivateKey
+	auditService         services.AuditService
+	refreshTokenService  services.RefreshTokenService
 }
 
-func NewUserHandler(userService services.UserService, settingsService *services.SettingsService, privateKey *rsa.PrivateKey, auditService services.AuditService) *UserHandler {
+func NewUserHandler(userService services.UserService, settingsService *services.SettingsService, privateKey *rsa.PrivateKey, auditService services.AuditService, refreshTokenService services.RefreshTokenService) *UserHandler {
 	return &UserHandler{
-		userService:     userService,
-		settingsService: settingsService,
-		privateKey:      privateKey,
-		auditService:    auditService,
+		userService:         userService,
+		settingsService:     settingsService,
+		privateKey:          privateKey,
+		auditService:        auditService,
+		refreshTokenService: refreshTokenService,
 	}
 }
 
@@ -63,7 +65,7 @@ func (h *UserHandler) generateJWT(userID uuid.UUID, email string, name string, r
 		Role:   role,
 		Status: status,
 		RegisteredClaims: jwt.RegisteredClaims{
-			ExpiresAt: jwt.NewNumericDate(time.Now().Add(8 * time.Hour)),
+			ExpiresAt: jwt.NewNumericDate(time.Now().Add(15 * time.Minute)),
 			IssuedAt:  jwt.NewNumericDate(time.Now()),
 			Issuer:    "claimctl",
 		},
@@ -71,6 +73,31 @@ func (h *UserHandler) generateJWT(userID uuid.UUID, email string, name string, r
 
 	token := jwt.NewWithClaims(jwt.SigningMethodRS256, claims)
 	return token.SignedString(h.privateKey)
+}
+
+// setAuthCookies sets the access_token and refresh_token HTTP-only cookies.
+func (h *UserHandler) setAuthCookies(c *fiber.Ctx, jwtToken, refreshToken string) {
+	secure := utils.GetEnvAsBool("COOKIE_SECURE", true)
+	sameSite := utils.GetEnv("COOKIE_SAMESITE", "Strict")
+
+	c.Cookie(&fiber.Cookie{
+		Name:     "access_token",
+		Value:    jwtToken,
+		Expires:  time.Now().Add(15 * time.Minute),
+		HTTPOnly: true,
+		Secure:   secure,
+		SameSite: sameSite,
+		Path:     "/",
+	})
+	c.Cookie(&fiber.Cookie{
+		Name:     "refresh_token",
+		Value:    refreshToken,
+		Expires:  time.Now().Add(7 * 24 * time.Hour),
+		HTTPOnly: true,
+		Secure:   secure,
+		SameSite: sameSite,
+		Path:     "/",
+	})
 }
 
 // Login handles user login
@@ -117,16 +144,12 @@ func (h *UserHandler) Login(c *fiber.Ctx) error {
 		return utils.SendError(c, fiber.StatusInternalServerError, "Failed to generate token", err)
 	}
 
-	// Set JWT in an HTTP-only cookie
-	c.Cookie(&fiber.Cookie{
-		Name:     "jwt",
-		Value:    token,
-		Expires:  time.Now().Add(24 * time.Hour),
-		HTTPOnly: true,
-		Secure:   utils.GetEnvAsBool("COOKIE_SECURE", true),
-		SameSite: utils.GetEnv("COOKIE_SAMESITE", "Strict"),
-		Path:     "/",
-	})
+	refreshToken, err := h.refreshTokenService.Issue(c.Context(), user.ID)
+	if err != nil {
+		return utils.SendError(c, fiber.StatusInternalServerError, "Failed to issue refresh token", err)
+	}
+
+	h.setAuthCookies(c, token, refreshToken)
 
 	return c.JSON(fiber.Map{
 		"user": fiber.Map{
@@ -143,18 +166,18 @@ func (h *UserHandler) Login(c *fiber.Ctx) error {
 
 // Logout logs out the user
 func (h *UserHandler) Logout(c *fiber.Ctx) error {
-	c.Cookie(&fiber.Cookie{
-		Name:     "jwt",
-		Value:    "",
-		Expires:  time.Now().Add(-1 * time.Hour), // Expire immediately
-		HTTPOnly: true,
-		Secure:   utils.GetEnvAsBool("COOKIE_SECURE", true),
-		SameSite: utils.GetEnv("COOKIE_SAMESITE", "Strict"),
-		Path:     "/",
-	})
-	return c.JSON(fiber.Map{
-		"message": "Logout successful",
-	})
+	if raw := c.Cookies("refresh_token"); raw != "" {
+		_ = h.refreshTokenService.Revoke(c.Context(), raw)
+	}
+
+	expired := time.Now().Add(-1 * time.Hour)
+	secure := utils.GetEnvAsBool("COOKIE_SECURE", true)
+	sameSite := utils.GetEnv("COOKIE_SAMESITE", "Strict")
+
+	c.Cookie(&fiber.Cookie{Name: "access_token", Value: "", Expires: expired, HTTPOnly: true, Secure: secure, SameSite: sameSite, Path: "/"})
+	c.Cookie(&fiber.Cookie{Name: "refresh_token", Value: "", Expires: expired, HTTPOnly: true, Secure: secure, SameSite: sameSite, Path: "/"})
+
+	return c.JSON(fiber.Map{"message": "Logout successful"})
 }
 
 // GetMe returns the current user
@@ -332,6 +355,10 @@ func (h *UserHandler) UpdateUser(c *fiber.Ctx) error {
 		return utils.SendError(c, fiber.StatusInternalServerError, "Failed to update user", err)
 	}
 
+	if user.Status != nil && *user.Status == "disabled" {
+		_ = h.refreshTokenService.RevokeAllByUser(c.Context(), idValue)
+	}
+
 	actor, _ := GetUserFromContext(c)
 	if actor != nil {
 		h.auditService.Log(c.Context(), actor.ID, "UPDATE", "USER", idValue.String(), user, c.IP())
@@ -365,6 +392,37 @@ func (h *UserHandler) DeleteUser(c *fiber.Ctx) error {
 	return nil
 }
 
+// RefreshToken issues a new access token using a valid refresh token.
+func (h *UserHandler) RefreshToken(c *fiber.Ctx) error {
+	raw := c.Cookies("refresh_token")
+	if raw == "" {
+		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"error": "Missing refresh token"})
+	}
+
+	newRaw, userID, err := h.refreshTokenService.Rotate(c.Context(), raw)
+	if err != nil {
+		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"error": "Invalid or expired refresh token"})
+	}
+
+	user, err := h.userService.GetUser(c.Context(), "", userID)
+	if err != nil {
+		return utils.SendError(c, fiber.StatusInternalServerError, "Failed to fetch user", err)
+	}
+
+	if user.Status == "disabled" {
+		_ = h.refreshTokenService.RevokeAllByUser(c.Context(), userID)
+		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"error": "Account is disabled"})
+	}
+
+	token, err := h.generateJWT(user.ID, user.Email, user.Name, user.Role, user.Status)
+	if err != nil {
+		return utils.SendError(c, fiber.StatusInternalServerError, "Failed to generate token", err)
+	}
+
+	h.setAuthCookies(c, token, newRaw)
+	return c.SendStatus(fiber.StatusOK)
+}
+
 // isAdmin checks if the user is an admin
 func (h *UserHandler) isAdmin(c *fiber.Ctx) bool {
 	user, err := GetUserFromContext(c)
@@ -391,16 +449,12 @@ func (h *UserHandler) LoginLDAP(c *fiber.Ctx) error {
 		return utils.SendError(c, fiber.StatusInternalServerError, "Failed to generate token", err)
 	}
 
-	// Set JWT in an HTTP-only cookie
-	c.Cookie(&fiber.Cookie{
-		Name:     "jwt",
-		Value:    token,
-		Expires:  time.Now().Add(24 * time.Hour),
-		HTTPOnly: true,
-		Secure:   utils.GetEnvAsBool("COOKIE_SECURE", true),
-		SameSite: utils.GetEnv("COOKIE_SAMESITE", "Strict"),
-		Path:     "/",
-	})
+	refreshToken, err := h.refreshTokenService.Issue(c.Context(), user.ID)
+	if err != nil {
+		return utils.SendError(c, fiber.StatusInternalServerError, "Failed to issue refresh token", err)
+	}
+
+	h.setAuthCookies(c, token, refreshToken)
 
 	return c.JSON(fiber.Map{
 		"user": fiber.Map{
@@ -425,22 +479,27 @@ func (h *UserHandler) LoginOIDC(c *fiber.Ctx) error {
 	state := utils.GenerateRandomString(16)
 	verifier := oauth2.GenerateVerifier()
 
-	// Store state and verifier in cookies
+	// Store state and verifier in cookies.
+	// SameSite must be Lax so the browser includes them on the
+	// cross-site redirect from the IdP back to /auth/oidc/callback.
+	oidcCookieSameSite := "Lax"
+	oidcCookieSecure := utils.GetEnvAsBool("COOKIE_SECURE", true)
+
 	c.Cookie(&fiber.Cookie{
 		Name:     "oidc_state",
 		Value:    state,
 		Expires:  time.Now().Add(10 * time.Minute),
 		HTTPOnly: true,
-		Secure:   utils.GetEnvAsBool("COOKIE_SECURE", true),
-		SameSite: utils.GetEnv("COOKIE_SAMESITE", "Strict"),
+		Secure:   oidcCookieSecure,
+		SameSite: oidcCookieSameSite,
 	})
 	c.Cookie(&fiber.Cookie{
 		Name:     "oidc_verifier",
 		Value:    verifier,
 		Expires:  time.Now().Add(10 * time.Minute),
 		HTTPOnly: true,
-		Secure:   utils.GetEnvAsBool("COOKIE_SECURE", true),
-		SameSite: utils.GetEnv("COOKIE_SAMESITE", "Strict"),
+		Secure:   oidcCookieSecure,
+		SameSite: oidcCookieSameSite,
 	})
 
 	authUrl := oauth2Config.AuthCodeURL(
@@ -502,16 +561,12 @@ func (h *UserHandler) CallbackOIDC(c *fiber.Ctx) error {
 		return utils.SendError(c, fiber.StatusInternalServerError, "Failed to generate token", err)
 	}
 
-	// Set JWT
-	c.Cookie(&fiber.Cookie{
-		Name:     "jwt",
-		Value:    token,
-		Expires:  time.Now().Add(24 * time.Hour),
-		HTTPOnly: true,
-		Secure:   utils.GetEnvAsBool("COOKIE_SECURE", true),
-		SameSite: utils.GetEnv("COOKIE_SAMESITE", "Strict"),
-		Path:     "/",
-	})
+	refreshToken, err := h.refreshTokenService.Issue(c.Context(), user.ID)
+	if err != nil {
+		return utils.SendError(c, fiber.StatusInternalServerError, "Failed to issue refresh token", err)
+	}
+
+	h.setAuthCookies(c, token, refreshToken)
 
 	// Clear OIDC cookies
 	c.ClearCookie("oidc_state")
@@ -619,6 +674,8 @@ func (h *UserHandler) HandleChangePassword(c *fiber.Ctx) error {
 		}
 		return utils.SendError(c, fiber.StatusBadRequest, err.Error(), err)
 	}
+
+	_ = h.refreshTokenService.RevokeAllByUser(c.Context(), user.ID)
 
 	return c.JSON(fiber.Map{
 		"message": "Password updated successfully",

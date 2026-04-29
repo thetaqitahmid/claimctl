@@ -1,13 +1,10 @@
-import { createApi, fetchBaseQuery } from "@reduxjs/toolkit/query/react";
+import { createApi } from "@reduxjs/toolkit/query/react";
 import { UserGroup, GroupMember } from "../../types";
-import { BACKEND_URL } from "../../config";
+import { baseQueryWithReauth } from "./baseQuery";
 
 export const groupsApiSlice = createApi({
   reducerPath: "groupsApi",
-  baseQuery: fetchBaseQuery({
-    baseUrl: `${BACKEND_URL}/api`,
-    credentials: "include",
-  }),
+  baseQuery: baseQueryWithReauth,
   tagTypes: ["Group", "GroupMember"],
   endpoints: (builder) => {
     return {

@@ -1,4 +1,5 @@
-import { createApi, fetchBaseQuery } from '@reduxjs/toolkit/query/react';
+import { createApi } from '@reduxjs/toolkit/query/react';
+import { baseQueryWithReauth } from './baseQuery';
 
 export interface UserNotificationPreference {
     userId: string;
@@ -15,13 +16,7 @@ export interface UserChannelConfig {
 
 export const preferencesApi = createApi({
     reducerPath: 'preferencesApi',
-    baseQuery: fetchBaseQuery({
-        baseUrl: '/api',
-        prepareHeaders: (headers) => {
-            // JWT is handled by HTTP-only cookie, but if we need auth header fallback:
-            return headers;
-        },
-    }),
+    baseQuery: baseQueryWithReauth,
     tagTypes: ['Preferences', 'UserConfig'],
     endpoints: (builder) => ({
         getPreferences: builder.query<UserNotificationPreference[], void>({

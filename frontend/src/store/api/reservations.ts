@@ -1,5 +1,5 @@
-import { createApi, fetchBaseQuery } from "@reduxjs/toolkit/query/react";
-import { BACKEND_URL } from "../../config";
+import { createApi } from "@reduxjs/toolkit/query/react";
+import { baseQueryWithReauth } from "./baseQuery";
 
 export interface CreateReservationRequest {
   resourceId: string;
@@ -7,10 +7,7 @@ export interface CreateReservationRequest {
 
 export const reservationsApiSlice = createApi({
   reducerPath: "reservations",
-  baseQuery: fetchBaseQuery({
-    baseUrl: `${BACKEND_URL}/api`,
-    credentials: "include",
-  }),
+  baseQuery: baseQueryWithReauth,
   tagTypes: ["Reservation"],
   endpoints: (builder) => {
     return {

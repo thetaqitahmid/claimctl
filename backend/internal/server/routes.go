@@ -75,7 +75,8 @@ func SetupRoutes(ctx context.Context, app *fiber.App, dbConn *connection.DBConn,
 	resourceHanlder := handlers.NewResourceHandler(resourceService, auditService)
 
 	// OIDC is now handled dynamically inside UserHandler via SettingsService
-	userHandler := handlers.NewUserHandler(userService, settingsService, privateKey, auditService)
+	refreshTokenService := services.NewRefreshTokenService(dbQueries)
+	userHandler := handlers.NewUserHandler(userService, settingsService, privateKey, auditService, refreshTokenService)
 	reservationHandler := handlers.NewReservationHandler(reservationService)
 	reservationHistoryHandler := handlers.NewReservationHistoryHandler(reservationHistoryService)
 	secretHandler := handlers.NewSecretHandler(secretService, auditService)
@@ -115,18 +116,32 @@ func SetupRoutes(ctx context.Context, app *fiber.App, dbConn *connection.DBConn,
 		},
 	})
 
+	refreshLimiter := limiter.New(limiter.Config{
+		Max:        10,
+		Expiration: 1 * time.Minute,
+		KeyGenerator: func(c *fiber.Ctx) string {
+			return c.IP()
+		},
+		LimitReached: func(c *fiber.Ctx) error {
+			return c.Status(fiber.StatusTooManyRequests).JSON(fiber.Map{
+				"error": "Too many refresh attempts. Please log in again.",
+			})
+		},
+	})
+
 	api.Post("/login", authLimiter, userHandler.Login)
 	api.Post("/logout", userHandler.Logout)
 	api.Post("/auth/ldap", authLimiter, userHandler.LoginLDAP)
 	api.Get("/auth/oidc/login", authLimiter, userHandler.LoginOIDC)
 	api.Get("/auth/oidc/callback", userHandler.CallbackOIDC)
+	api.Post("/auth/refresh", refreshLimiter, userHandler.RefreshToken)
 
 	api.Use(jwtware.New(jwtware.Config{
 		SigningKey: jwtware.SigningKey{
 			JWTAlg: jwtware.RS256,
 			Key:    publicKey,
 		},
-		TokenLookup: "cookie:jwt,header:Authorization",
+		TokenLookup: "cookie:access_token,header:Authorization",
 		ErrorHandler: func(c *fiber.Ctx, err error) error {
 			fmt.Println("JWT Error:", err)
 			return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{

@@ -1,13 +1,10 @@
-import { createApi, fetchBaseQuery } from "@reduxjs/toolkit/query/react";
+import { createApi } from "@reduxjs/toolkit/query/react";
 import { User, CreateUserRequest } from "./auth";
-import { BACKEND_URL } from "../../config";
+import { baseQueryWithReauth } from "./baseQuery";
 
 export const userApiSlice = createApi({
   reducerPath: "userApi",
-  baseQuery: fetchBaseQuery({
-    baseUrl: `${BACKEND_URL}/api`,
-    credentials: "include",
-  }),
+  baseQuery: baseQueryWithReauth,
   tagTypes: ["User"],
   endpoints: (builder) => {
     return {

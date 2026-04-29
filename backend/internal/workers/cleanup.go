@@ -72,4 +72,12 @@ func (w *CleanupWorker) RunCleanup(ctx context.Context) {
 	} else {
 		slog.Debug("Cleaned up old webhook logs", "olderThan", cutoffTime)
 	}
+
+	// 3. Cleanup Expired Refresh Tokens
+	err = w.db.DeleteExpiredRefreshTokens(ctx)
+	if err != nil {
+		slog.Error("Failed to cleanup expired refresh tokens", "error", err)
+	} else {
+		slog.Debug("Cleaned up expired refresh tokens")
+	}
 }

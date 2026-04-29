@@ -64,6 +64,16 @@ type ClaimctlMaintenanceAuditLog struct {
 	Reason        pgtype.Text `json:"reason"`
 }
 
+type ClaimctlRefreshToken struct {
+	ID        uuid.UUID          `json:"id"`
+	UserID    uuid.UUID          `json:"userId"`
+	TokenHash string             `json:"tokenHash"`
+	FamilyID  uuid.UUID          `json:"familyId"`
+	ExpiresAt pgtype.Timestamptz `json:"expiresAt"`
+	Revoked   bool               `json:"revoked"`
+	CreatedAt pgtype.Timestamptz `json:"createdAt"`
+}
+
 type ClaimctlReservation struct {
 	ID               uuid.UUID          `json:"id"`
 	ResourceID       uuid.UUID          `json:"resourceId"`

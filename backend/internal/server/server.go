@@ -48,6 +48,9 @@ func NewServer(ctx context.Context, db *connection.DBConn, privateKey *rsa.Priva
 			CookieSecure:   utils.GetEnvAsBool("COOKIE_SECURE", true),
 			CookieHTTPOnly: true,
 			Expiration:     1 * time.Hour,
+			Next: func(c *fiber.Ctx) bool {
+				return c.Path() == "/api/auth/refresh"
+			},
 		}))
 	}
 

@@ -1,13 +1,10 @@
-import { createApi, fetchBaseQuery } from "@reduxjs/toolkit/query/react";
+import { createApi } from "@reduxjs/toolkit/query/react";
 import { Space } from "../../types";
-import { BACKEND_URL } from "../../config";
+import { baseQueryWithReauth } from "./baseQuery";
 
 export const spacesApiSlice = createApi({
   reducerPath: "spaces",
-  baseQuery: fetchBaseQuery({
-    baseUrl: `${BACKEND_URL}/api`,
-    credentials: "include",
-  }),
+  baseQuery: baseQueryWithReauth,
   tagTypes: ["Space"],
   endpoints: (builder) => {
     return {

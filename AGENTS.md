@@ -21,8 +21,14 @@ make db_down    # Stop PostgreSQL container
 make migrate_up # Run migrations
 make sqlc       # Regenerate sqlc code
 
-# Run all tests
+# Run all tests (backend + frontend lint/test/build + CLI)
 make test
+
+# Force migration to a specific version
+make migrate_force VERSION=<version>
+
+# Stop full dev environment
+make dev_down
 ```
 
 ### Backend (Go)
@@ -48,16 +54,34 @@ go test -v ./...                        # Verbose output
 go test -cover ./...                    # With coverage
 ```
 
+### CLI (Go)
+
+```bash
+cd cli
+
+# Build
+go build -o claimctl main.go
+
+# Tests
+go test ./...
+go test -v ./...
+```
+
 ### Frontend (React/TypeScript)
 
 ```bash
 cd frontend
 
 # Development
-npm run dev         # Start Vite dev server
-npm run build       # TypeScript compile + Vite build
-npm run lint        # ESLint check
-npm run preview     # Preview production build
+npm run dev             # Start Vite dev server
+npm run build           # TypeScript compile + Vite build
+npm run lint            # ESLint check
+npm run preview         # Preview production build
+
+# Tests (Vitest)
+npm run test            # Run tests once
+npm run test:watch      # Watch mode
+npm run test:coverage   # With coverage
 ```
 
 ## Code Style Guidelines
@@ -85,12 +109,17 @@ import (
 **Package Structure**
 
 - `cmd/` - Application entry points
-- `internal/handlers/` - HTTP request handlers (Fiber)
+- `internal/server/` - Fiber server setup, routes, and middleware
+- `internal/server/handlers/` - HTTP request handlers
 - `internal/services/` - Business logic interfaces and implementations
 - `internal/db/` - sqlc-generated database code
 - `internal/types/` - Custom types (JSONB, events)
 - `internal/utils/` - Utility functions
 - `internal/testutils/` - Test helpers and mocks
+- `internal/workers/` - Background workers (expiry, cleanup)
+- `internal/connection/` - Database connection and migration setup
+- `internal/logger/` - Logging setup
+- `internal/telemetry/` - Telemetry/metrics
 
 **Naming Conventions**
 
@@ -182,6 +211,20 @@ export default ComponentName
 - Semantic colors: `text-slate-600`, `bg-blue-50`, `border-gray-200`
 - Consistent spacing: `p-4`, `m-2`, `gap-4`
 - Responsive: `md:`, `lg:` prefixes
+
+**Testing** (Vitest + Testing Library)
+
+- Test files alongside source or in `src/test/`
+- Use `@testing-library/react` for component tests
+- Use `@testing-library/user-event` for interaction simulation
+
+### CLI (Go)
+
+**Package Structure**
+
+- `cmd/` - Cobra command definitions
+- `pkg/api/` - API client for backend communication
+- `testutils/` - Mock helpers for CLI tests
 
 ### Database Schema
 

@@ -175,7 +175,7 @@ const ProfileNotifications = () => {
                         {EVENTS.map(event => (
                             <tr key={event} className="hover:bg-slate-800/30 transition-colors">
                                 <td className="px-6 py-4 font-medium text-white capitalize">
-                                    {event.replace('reservation.', 'Reservation ')}
+                                    {event.replace('reservation_', 'Reservation ').replace('_', ' ')}
                                 </td>
                                 {CHANNELS.map(channel => (
                                     <td key={channel} className="px-6 py-4 text-center">

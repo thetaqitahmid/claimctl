@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/thetaqitahmid/claimctl/internal/db"
 )
@@ -13,7 +14,7 @@ type ReservationHistoryService interface {
 	AddManualHistoryLog(ctx context.Context, req AddHistoryLogRequest) (*db.ClaimctlReservationHistory, error)
 	GetRecentHistoryByAction(ctx context.Context, action string, limit int32) (*[]db.GetRecentHistoryByActionRow, error)
 	GetUserHistory(ctx context.Context, userID uuid.UUID) (*[]db.GetUserReservationHistoryRow, error)
-	GetResourceHistory(ctx context.Context, resourceID uuid.UUID) (*[]db.GetResourceReservationHistoryRow, error)
+	GetResourceHistory(ctx context.Context, resourceID uuid.UUID, userID uuid.UUID, isAdmin bool) (*[]db.GetResourceReservationHistoryRow, error)
 }
 
 type AddHistoryLogRequest = db.AddReservationHistoryLogParams
@@ -67,7 +68,21 @@ func (s *reservationHistoryService) GetUserHistory(ctx context.Context, userID u
 	return &history, nil
 }
 
-func (s *reservationHistoryService) GetResourceHistory(ctx context.Context, resourceID uuid.UUID) (*[]db.GetResourceReservationHistoryRow, error) {
+func (s *reservationHistoryService) GetResourceHistory(ctx context.Context, resourceID uuid.UUID, userID uuid.UUID, isAdmin bool) (*[]db.GetResourceReservationHistoryRow, error) {
+	if !isAdmin {
+		resource, err := s.db.FindResourceById(ctx, resourceID)
+		if err != nil {
+			return nil, fmt.Errorf("resource not found")
+		}
+		hasPerm, err := s.db.HasSpacePermission(ctx, db.HasSpacePermissionParams{
+			ID:     resource.SpaceID,
+			UserID: pgtype.UUID{Bytes: userID, Valid: true},
+		})
+		if err != nil || !hasPerm {
+			return nil, fmt.Errorf("access denied")
+		}
+	}
+
 	history, err := s.db.GetResourceReservationHistory(ctx, resourceID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get resource history: %w", err)

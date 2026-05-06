@@ -15,15 +15,15 @@ import (
 
 type ResourceWithStatus struct {
 	Resource                   db.ClaimctlResource              `json:"resource"`
-	ActiveReservations         int64                                 `json:"activeReservations"`
-	QueueLength                int64                                 `json:"queueLength"`
-	NextUserID uuid.UUID                                 `json:"nextUserId"`
-	NextQueuePosition          int32                                 `json:"nextQueuePosition"`
+	ActiveReservations         int64                            `json:"activeReservations"`
+	QueueLength                int64                            `json:"queueLength"`
+	NextUserID                 uuid.UUID                        `json:"nextUserId"`
+	NextQueuePosition          int32                            `json:"nextQueuePosition"`
 	HealthStatus               *db.ClaimctlResourceHealthStatus `json:"healthStatus,omitempty"`
 	HealthConfig               *db.ClaimctlResourceHealthConfig `json:"healthConfig,omitempty"`
-	ActiveReservationStartTime *int64                                `json:"activeReservationStartTime,omitempty"`
-	ActiveReservationDuration  *string                               `json:"activeReservationDuration,omitempty"`
-	ActiveReservationCreatedAt *int64                                `json:"activeReservationCreatedAt,omitempty"`
+	ActiveReservationStartTime *int64                           `json:"activeReservationStartTime,omitempty"`
+	ActiveReservationDuration  *string                          `json:"activeReservationDuration,omitempty"`
+	ActiveReservationCreatedAt *int64                           `json:"activeReservationCreatedAt,omitempty"`
 }
 
 type ResourceService interface {
@@ -373,9 +373,6 @@ func (s *resourceService) enrichResourcesWithHealth(ctx context.Context, resourc
 	}
 
 	resources := make([]ResourceWithStatus, len(filteredStatus))
-
-	// Avoiding N+1 problem naively for now, but parallelizing helper
-	// Ideally we'd have bulk fetch queries for health
 
 	for i, resourceStatus := range filteredStatus {
 		resource := db.ClaimctlResource{

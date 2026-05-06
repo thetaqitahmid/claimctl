@@ -19,6 +19,7 @@ import (
 	"github.com/thetaqitahmid/claimctl/internal/db"
 	"github.com/thetaqitahmid/claimctl/internal/server/handlers"
 	"github.com/thetaqitahmid/claimctl/internal/services"
+	"github.com/thetaqitahmid/claimctl/internal/utils"
 	"github.com/thetaqitahmid/claimctl/internal/workers"
 )
 
@@ -221,7 +222,7 @@ func SetupRoutes(ctx context.Context, app *fiber.App, dbConn *connection.DBConn,
 	api.Patch("/reservations/:id/cancel", reservationHandler.CancelReservation)
 
 	// Admin: Cancel all reservations for a resource
-	api.Delete("/admin/resources/:id/reservations", reservationHandler.CancelAllReservations)
+	admin.Delete("/resources/:id/reservations", reservationHandler.CancelAllReservations)
 
 	// Resource-specific reservation endpoints
 	api.Get("/resources/:resourceId/reservations", reservationHandler.GetResourceReservations)
@@ -231,7 +232,7 @@ func SetupRoutes(ctx context.Context, app *fiber.App, dbConn *connection.DBConn,
 	api.Post("/resources/:resourceId/queue/process", reservationHandler.ProcessQueue)
 
 	// Admin-only reservation endpoints
-	api.Get("/admin/reservations", reservationHandler.GetAllReservations)
+	admin.Get("/reservations", reservationHandler.GetAllReservations)
 
 	// Users: Only admin users can access these routes
 	api.Get("/users", userHandler.GetUsers) // Read is fine for dropdowns
@@ -247,10 +248,10 @@ func SetupRoutes(ctx context.Context, app *fiber.App, dbConn *connection.DBConn,
 	api.Patch("/spaces/:id", AdminMiddleware(), spaceHandler.UpdateSpace)
 	api.Delete("/spaces/:id", AdminMiddleware(), spaceHandler.DeleteSpace)
 
-	// Space Permissions
+	// Space Permissions (Admin Only)
 	api.Get("/spaces/:id/permissions", spaceHandler.GetSpacePermissions)
-	api.Post("/spaces/:id/permissions", spaceHandler.AddPermission)
-	api.Delete("/spaces/:id/permissions", spaceHandler.RemovePermission)
+	api.Post("/spaces/:id/permissions", AdminMiddleware(), spaceHandler.AddPermission)
+	api.Delete("/spaces/:id/permissions", AdminMiddleware(), spaceHandler.RemovePermission)
 
 	// Access Groups (Admin Only)
 	groups := api.Group("/groups", AdminMiddleware())
@@ -283,6 +284,8 @@ func SetupRoutes(ctx context.Context, app *fiber.App, dbConn *connection.DBConn,
 	api.Post("/tokens", apiTokenHandler.GenerateToken)
 	api.Delete("/tokens/:id", apiTokenHandler.RevokeToken)
 
-	// Swagger Documentation
-	app.Get("/swagger/*", fiberSwagger.WrapHandler)
+	// Swagger Documentation (disabled by default, requires ENABLE_SWAGGER=true)
+	if utils.GetEnvAsBool("ENABLE_SWAGGER", false) {
+		admin.Get("/swagger/*", fiberSwagger.WrapHandler)
+	}
 }

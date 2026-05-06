@@ -57,8 +57,8 @@ func (m *MockReservationHistoryService) GetUserHistory(ctx context.Context, user
 	return args.Get(0).(*[]db.GetUserReservationHistoryRow), args.Error(1)
 }
 
-func (m *MockReservationHistoryService) GetResourceHistory(ctx context.Context, resourceID uuid.UUID) (*[]db.GetResourceReservationHistoryRow, error) {
-	args := m.Called(ctx, resourceID)
+func (m *MockReservationHistoryService) GetResourceHistory(ctx context.Context, resourceID uuid.UUID, userID uuid.UUID, isAdmin bool) (*[]db.GetResourceReservationHistoryRow, error) {
+	args := m.Called(ctx, resourceID, userID, isAdmin)
 	if args.Get(0) == nil {
 		return nil, args.Error(1)
 	}

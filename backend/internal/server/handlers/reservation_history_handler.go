@@ -35,14 +35,20 @@ func (h *ReservationHistoryHandler) GetUserHistory(c *fiber.Ctx) error {
 
 // GetResourceHistory retrieves the reservation history for a specific resource (Admin only)
 func (h *ReservationHistoryHandler) GetResourceHistory(c *fiber.Ctx) error {
+	user, err := GetUserFromContext(c)
+	if err != nil {
+		return utils.SendError(c, fiber.StatusUnauthorized, "Unauthorized", err)
+	}
+
 	resourceID, err := utils.GetUUIDParam(c, "id")
 	if err != nil {
 		return nil
 	}
 
-	history, err := h.reservationHistoryService.GetResourceHistory(c.Context(), resourceID)
+	isAdmin := user.Role == "admin"
+	history, err := h.reservationHistoryService.GetResourceHistory(c.Context(), resourceID, user.ID, isAdmin)
 	if err != nil {
-		return utils.SendError(c, fiber.StatusInternalServerError, "Failed to get resource history", err)
+		return utils.SendError(c, fiber.StatusForbidden, "Access denied or resource not found", err)
 	}
 
 	return c.JSON(history)

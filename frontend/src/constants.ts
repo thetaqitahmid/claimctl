@@ -4,10 +4,11 @@ export const REALTIME_EVENTS = {
 };
 
 export const EVENTS = [
-  'reservation.created',
-  'reservation.cancelled',
-  'reservation.completed',
-  'reservation.activated',
+  'reservation_created',
+  'reservation_activated',
+  'reservation_completed',
+  'reservation_cancelled',
+  'reservation_expired',
 ];
 
 export const CHANNELS = ['email', 'slack', 'teams'];

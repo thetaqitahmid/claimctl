@@ -33,6 +33,12 @@ func NewResourceHandler(resourceService services.ResourceService, auditService s
 // @Failure 500 {object} map[string]string
 // @Router /resources [get]
 func (h *ResourceHandler) GetResources(c *fiber.Ctx) error {
+	if !h.isAdmin(c) {
+		return c.Status(fiber.StatusForbidden).JSON(fiber.Map{
+			"error": "You do not have permission to view all resources",
+		})
+	}
+
 	labelExprStr := c.Query("label_expr")
 	labelFilter, err := utils.ParseLabelFilter(labelExprStr)
 	if err != nil {

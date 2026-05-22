@@ -1,16 +1,13 @@
-import React, { useState, useCallback, useEffect } from "react";
+import React, { useState } from "react";
 import { Resource } from "../types";
 import { useUpdateResourceMutation } from "../store/api/resources";
+import {
+  useListWebhooksQuery,
+  useGetResourceWebhooksQuery,
+  useAddResourceWebhookMutation,
+  useRemoveResourceWebhookMutation,
+} from "../store/api/webhooks";
 import { X, Zap } from "lucide-react";
-
-interface Webhook {
-  id: string;
-  name: string;
-}
-
-interface AssignedWebhook extends Webhook {
-  events: string[];
-}
 
 interface EditResourceFormProps {
   resource: Resource;
@@ -26,64 +23,32 @@ const EditResourceForm: React.FC<EditResourceFormProps> = ({
   const [name, setName] = useState(resource.name);
   const [type, setType] = useState(resource.type);
   const [labels, setLabels] = useState(resource.labels.join(", "));
-  const [properties, setProperties] = useState<{ [key: string]: string }>(resource.properties || {});
+  const [properties, setProperties] = useState<{ [key: string]: string }>(
+    resource.properties || {}
+  );
   const [updateMutation, { isLoading }] = useUpdateResourceMutation();
 
-  // Webhooks state
-  const [availableWebhooks, setAvailableWebhooks] = useState<Webhook[]>([]);
-  const [assignedWebhooks, setAssignedWebhooks] = useState<AssignedWebhook[]>([]);
-  const [isLoadingWebhooks, setIsLoadingWebhooks] = useState(false);
+  const { data: availableWebhooks = [] } = useListWebhooksQuery();
+  const { data: assignedWebhooks } = useGetResourceWebhooksQuery(
+    resource.id
+  );
+  const safeAssignedWebhooks = assignedWebhooks ?? [];
+  const [addResourceWebhook] = useAddResourceWebhookMutation();
+  const [removeResourceWebhook] = useRemoveResourceWebhookMutation();
+
   const [selectedWebhookId, setSelectedWebhookId] = useState<string>("");
   const [selectedEvents, setSelectedEvents] = useState<string[]>([]);
-
-  const fetchWebhooksData = useCallback(async () => {
-    setIsLoadingWebhooks(true);
-    try {
-      const allRes = await fetch('/api/webhooks', { credentials: 'include' });
-      if (allRes.ok) {
-        const ct = allRes.headers.get("content-type");
-        if (ct && ct.includes("application/json")) {
-          const allData = await allRes.json();
-          setAvailableWebhooks(allData || []);
-        }
-      }
-
-      const assignedRes = await fetch(`/api/resources/${resource.id}/webhooks`, { credentials: 'include' });
-      if (assignedRes.ok) {
-        const ct = assignedRes.headers.get("content-type");
-        if (ct && ct.includes("application/json")) {
-          const assignedData = await assignedRes.json();
-          setAssignedWebhooks(assignedData || []);
-        }
-      }
-    } catch (e) {
-      console.error("Failed to fetch webhooks", e);
-    } finally {
-      setIsLoadingWebhooks(false);
-    }
-  }, [resource.id]);
-
-  useEffect(() => {
-    fetchWebhooksData();
-  }, [fetchWebhooksData]);
 
   const handleAddWebhook = async () => {
     if (!selectedWebhookId || selectedEvents.length === 0) return;
     try {
-      const res = await fetch(`/api/resources/${resource.id}/webhooks`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          webhook_id: selectedWebhookId,
-          events: selectedEvents
-        })
-      });
-
-      if (res.ok) {
-        fetchWebhooksData();
-        setSelectedWebhookId("");
-        setSelectedEvents([]);
-      }
+      await addResourceWebhook({
+        resourceId: resource.id,
+        webhook_id: selectedWebhookId,
+        events: selectedEvents,
+      }).unwrap();
+      setSelectedWebhookId("");
+      setSelectedEvents([]);
     } catch (e) {
       console.error(e);
     }
@@ -92,27 +57,32 @@ const EditResourceForm: React.FC<EditResourceFormProps> = ({
   const handleRemoveWebhook = async (webhookId: string) => {
     if (!confirm("Remove webhook assignment?")) return;
     try {
-      const res = await fetch(`/api/resources/${resource.id}/webhooks/${webhookId}`, {
-        method: 'DELETE',
-        headers: { 'Content-Type': 'application/json' },
-      });
-
-      if (res.ok) {
-        fetchWebhooksData();
-      }
+      await removeResourceWebhook({
+        resourceId: resource.id,
+        webhookId,
+      }).unwrap();
     } catch (e) {
       console.error(e);
     }
   };
 
   const handleSave = async () => {
-    const updatedLabels = labels.split(",").map(l => l.trim()).filter(l => l !== "");
+    const updatedLabels = labels
+      .split(",")
+      .map((l) => l.trim())
+      .filter((l) => l !== "");
     const cleanProps: { [key: string]: string } = {};
     Object.entries(properties).forEach(([k, v]) => {
       if (k.trim()) cleanProps[k.trim()] = v.trim();
     });
 
-    const updatedResource = { ...resource, name, type, labels: updatedLabels, properties: cleanProps };
+    const updatedResource = {
+      ...resource,
+      name,
+      type,
+      labels: updatedLabels,
+      properties: cleanProps,
+    };
     try {
       await updateMutation({
         id: updatedResource.id,
@@ -131,15 +101,17 @@ const EditResourceForm: React.FC<EditResourceFormProps> = ({
     "reservation.created",
     "reservation.cancelled",
     "reservation.activated",
-    "reservation.completed"
+    "reservation.completed",
   ];
 
   return (
     <div className="space-y-6">
-      {/* Name and Type Fields */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         <div className="space-y-2">
-          <label htmlFor="edit-name" className="text-sm font-medium text-slate-300">
+          <label
+            htmlFor="edit-name"
+            className="text-sm font-medium text-slate-300"
+          >
             Resource Name
           </label>
           <input
@@ -152,7 +124,10 @@ const EditResourceForm: React.FC<EditResourceFormProps> = ({
         </div>
 
         <div className="space-y-2">
-          <label htmlFor="edit-type" className="text-sm font-medium text-slate-300">
+          <label
+            htmlFor="edit-type"
+            className="text-sm font-medium text-slate-300"
+          >
             Resource Type
           </label>
           <input
@@ -165,9 +140,11 @@ const EditResourceForm: React.FC<EditResourceFormProps> = ({
         </div>
       </div>
 
-      {/* Labels */}
       <div className="space-y-2">
-        <label htmlFor="edit-labels" className="text-sm font-medium text-slate-300">
+        <label
+          htmlFor="edit-labels"
+          className="text-sm font-medium text-slate-300"
+        >
           Labels (comma-separated)
         </label>
         <input
@@ -179,14 +156,15 @@ const EditResourceForm: React.FC<EditResourceFormProps> = ({
         />
       </div>
 
-      {/* Properties Section */}
       <div className="space-y-4 border-t border-slate-800/50 pt-4">
         <div className="flex justify-between items-center">
-          <label className="text-sm font-medium text-slate-300">Properties (max 10)</label>
+          <label className="text-sm font-medium text-slate-300">
+            Properties (max 10)
+          </label>
           <button
             onClick={() => {
               if (Object.keys(properties).length < 10) {
-                setProperties({...properties, "": ""});
+                setProperties({ ...properties, "": "" });
               }
             }}
             disabled={Object.keys(properties).length >= 10}
@@ -219,7 +197,7 @@ const EditResourceForm: React.FC<EditResourceFormProps> = ({
                 onChange={(e) => {
                   setProperties({
                     ...properties,
-                    [key]: e.target.value
+                    [key]: e.target.value,
                   });
                 }}
                 className="flex-1 bg-slate-900/50 border border-slate-700 rounded-lg px-3 py-1.5 text-sm text-white focus:border-cyan-500 focus:outline-none"
@@ -239,88 +217,100 @@ const EditResourceForm: React.FC<EditResourceFormProps> = ({
         </div>
       </div>
 
-      {/* Webhooks Section */}
       <div className="space-y-4 border-t border-slate-800/50 pt-4">
         <h4 className="text-sm font-medium text-slate-300 flex items-center gap-2">
           <Zap className="w-4 h-4 text-yellow-400" /> Webhooks
         </h4>
 
-        {isLoadingWebhooks ? (
-          <div className="text-xs text-slate-500">Loading webhooks...</div>
-        ) : (
-          <div className="space-y-3">
-            {/* Assigned Webhooks List */}
-            {assignedWebhooks.map((link) => (
-              <div key={link.id} className="flex items-center justify-between bg-slate-800/40 p-3 rounded-lg border border-slate-700/50">
-                <div>
-                  <div className="text-sm text-white font-medium">{link.name}</div>
-                  <div className="text-xs text-slate-400 flex gap-1 mt-1">
-                    {link.events?.map((ev: string) => (
-                      <span key={ev} className="bg-slate-700 px-1.5 rounded">{ev.split('.')[1]}</span>
-                    ))}
-                  </div>
+        <div className="space-y-3">
+          {safeAssignedWebhooks.map((link) => (
+            <div
+              key={link.id}
+              className="flex items-center justify-between bg-slate-800/40 p-3 rounded-lg border border-slate-700/50"
+            >
+              <div>
+                <div className="text-sm text-white font-medium">
+                  {link.name}
                 </div>
-                <button
-                  onClick={() => handleRemoveWebhook(link.id)}
-                  className="text-slate-500 hover:text-red-400 p-1"
-                >
-                  <X className="w-4 h-4" />
-                </button>
-              </div>
-            ))}
-
-            {/* Add New Webhook */}
-            <div className="bg-slate-900/30 p-3 rounded-lg border border-slate-800/50 space-y-3">
-              <div className="flex gap-2">
-                <select
-                  className="flex-1 bg-slate-900 border border-slate-700 rounded text-sm text-white px-2 py-1"
-                  value={selectedWebhookId}
-                  onChange={(e) => setSelectedWebhookId(e.target.value)}
-                >
-                  <option value="">Select Webhook...</option>
-                  {availableWebhooks.filter(w => !assignedWebhooks.find(aw => aw.id === w.id)).map(w => (
-                    <option key={w.id} value={w.id}>{w.name}</option>
-                  ))}
-                </select>
-                <button
-                  onClick={handleAddWebhook}
-                  disabled={!selectedWebhookId || selectedEvents.length === 0}
-                  className="bg-cyan-600 hover:bg-cyan-700 disabled:opacity-50 disabled:cursor-not-allowed text-white text-xs px-3 py-1 rounded"
-                >
-                  Add
-                </button>
-              </div>
-              {selectedWebhookId && (
-                <div className="flex flex-wrap gap-2">
-                  {eventOptions.map(ev => (
-                    <label key={ev} className="flex items-center gap-1.5 text-xs text-slate-300 cursor-pointer hover:text-white">
-                      <input
-                        type="checkbox"
-                        checked={selectedEvents.includes(ev)}
-                        onChange={(e) => {
-                          if (e.target.checked) setSelectedEvents([...selectedEvents, ev]);
-                          else setSelectedEvents(selectedEvents.filter(x => x !== ev));
-                        }}
-                        className="rounded border-slate-700 bg-slate-800"
-                      />
-                      {ev.replace('reservation.', '')}
-                    </label>
+                <div className="text-xs text-slate-400 flex gap-1 mt-1">
+                  {link.events?.map((ev: string) => (
+                    <span key={ev} className="bg-slate-700 px-1.5 rounded">
+                      {ev.split(".")[1]}
+                    </span>
                   ))}
                 </div>
-              )}
+              </div>
+              <button
+                onClick={() => handleRemoveWebhook(link.id)}
+                className="text-slate-500 hover:text-red-400 p-1"
+              >
+                <X className="w-4 h-4" />
+              </button>
             </div>
+          ))}
+
+          <div className="bg-slate-900/30 p-3 rounded-lg border border-slate-800/50 space-y-3">
+            <div className="flex gap-2">
+              <select
+                className="flex-1 bg-slate-900 border border-slate-700 rounded text-sm text-white px-2 py-1"
+                value={selectedWebhookId}
+                onChange={(e) => setSelectedWebhookId(e.target.value)}
+              >
+                <option value="">Select Webhook...</option>
+                {availableWebhooks
+                  .filter(
+                    (w) => !safeAssignedWebhooks.find((aw) => aw.id === w.id)
+                  )
+                  .map((w) => (
+                    <option key={w.id} value={w.id}>
+                      {w.name}
+                    </option>
+                  ))}
+              </select>
+              <button
+                onClick={handleAddWebhook}
+                disabled={!selectedWebhookId || selectedEvents.length === 0}
+                className="bg-cyan-600 hover:bg-cyan-700 disabled:opacity-50 disabled:cursor-not-allowed text-white text-xs px-3 py-1 rounded"
+              >
+                Add
+              </button>
+            </div>
+            {selectedWebhookId && (
+              <div className="flex flex-wrap gap-2">
+                {eventOptions.map((ev) => (
+                  <label
+                    key={ev}
+                    className="flex items-center gap-1.5 text-xs text-slate-300 cursor-pointer hover:text-white"
+                  >
+                    <input
+                      type="checkbox"
+                      checked={selectedEvents.includes(ev)}
+                      onChange={(e) => {
+                        if (e.target.checked)
+                          setSelectedEvents([...selectedEvents, ev]);
+                        else
+                          setSelectedEvents(
+                            selectedEvents.filter((x) => x !== ev)
+                          );
+                      }}
+                      className="rounded border-slate-700 bg-slate-800"
+                    />
+                    {ev.replace("reservation.", "")}
+                  </label>
+                ))}
+              </div>
+            )}
           </div>
-        )}
+        </div>
       </div>
 
-      {/* Action Buttons */}
       <div className="flex gap-3 pt-4 border-t border-slate-800/50">
         <button
           onClick={handleSave}
           disabled={!name.trim() || isLoading}
           className="flex-1 px-4 py-2 bg-cyan-500 hover:bg-cyan-600 disabled:bg-slate-700 disabled:text-slate-500 text-white rounded-lg text-sm font-medium transition-colors"
         >
-          {isLoading ? 'Saving...' : 'Save Changes'}
+          {isLoading ? "Saving..." : "Save Changes"}
         </button>
         {onCancel && (
           <button

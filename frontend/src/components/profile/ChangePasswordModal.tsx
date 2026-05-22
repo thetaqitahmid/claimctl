@@ -1,10 +1,10 @@
 import { useState } from "react";
-import { useChangePasswordMutation } from "../../store/api/users.ts"; // Adjusted import path based on relative location? No, store is in src/store
-// Wait, path to users.ts is src/store/api/users.ts
-// If I place this in src/components/profile/ChangePasswordModal.tsx
-// Then import is ../../store/api/users
+import { useChangePasswordMutation } from "../../store/api/users.ts";
 import { Dialog, DialogPanel, DialogTitle, Transition, TransitionChild } from "@headlessui/react";
 import { X } from "lucide-react";
+import { useDispatch } from "react-redux";
+import { useNavigate } from "react-router-dom";
+import { clearCredentials } from "../../store/slices/authSlice";
 
 interface ChangePasswordModalProps {
   isOpen: boolean;
@@ -18,6 +18,8 @@ const ChangePasswordModal = ({ isOpen, onClose }: ChangePasswordModalProps) => {
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
 
+  const dispatch = useDispatch();
+  const navigate = useNavigate();
   const [changePassword, { isLoading }] = useChangePasswordMutation();
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -37,14 +39,16 @@ const ChangePasswordModal = ({ isOpen, onClose }: ChangePasswordModalProps) => {
 
     try {
       await changePassword({ current_password: currentPassword, new_password: newPassword }).unwrap();
-      setSuccess("Password changed successfully");
+      setSuccess("Password changed successfully. Redirecting to login...");
       setCurrentPassword("");
       setNewPassword("");
       setConfirmPassword("");
       setTimeout(() => {
         onClose();
         setSuccess("");
-      }, 2000);
+        dispatch(clearCredentials());
+        navigate("/login", { replace: true });
+      }, 1500);
     } catch (err) {
       setError("Failed to change password. Please check your current password.");
       console.error(err)

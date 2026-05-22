@@ -1,0 +1,1 @@
+ALTER TABLE claimctl.users ADD COLUMN IF NOT EXISTS auth_provider VARCHAR(20) NOT NULL DEFAULT 'local';

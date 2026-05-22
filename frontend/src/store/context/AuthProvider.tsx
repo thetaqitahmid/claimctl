@@ -20,14 +20,6 @@ function AuthProvider({ children }: AuthProviderProps) {
     if (skipAuthCheck) return;
 
     if (isError || (!isLoading && !stateUser)) {
-      console.error(
-        "AuthProvider: user=",
-        stateUser,
-        "isError=",
-        isError,
-        "path=",
-        location.pathname
-      );
       navigate("/login", { replace: true });
     }
   }, [isError, isLoading, location, stateUser, navigate, skipAuthCheck]);

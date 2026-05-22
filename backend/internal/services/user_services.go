@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"os"
 	"strings"
 	"time"
 
@@ -301,8 +302,15 @@ func (s *userService) EnsureAdminExists(ctx context.Context) error {
 
 func (s *userService) createDefaultAdmin(ctx context.Context) error {
 	adminEmail := utils.GetEnv("ADMIN_EMAIL", "admin@claimctl.com")
-	adminPassword := utils.GetEnv("ADMIN_PASSWORD", "adminpassword")
+	adminPassword := utils.GetEnv("ADMIN_PASSWORD", "")
 	adminName := utils.GetEnv("ADMIN_USER", "System Administrator")
+
+	if adminPassword == "" {
+		adminPassword = utils.GenerateStrongPassword(16)
+		fmt.Fprintf(os.Stderr, "Generated random admin password. Set ADMIN_PASSWORD to avoid this.\n")
+	} else if !utils.IsValidPassword(adminPassword) {
+		slog.Warn("ADMIN_PASSWORD does not meet complexity requirements (min 8 chars, uppercase, lowercase, digit, special char)")
+	}
 
 	// Check if user with this email already exists
 	existingCount, err := s.db.VerifyUserEmailIsUnique(ctx, adminEmail)
@@ -326,13 +334,13 @@ func (s *userService) createDefaultAdmin(ctx context.Context) error {
 	status := "active"
 
 	err = s.db.CreateUser(ctx, db.CreateUserParams{
-		Email:    adminEmail,
-		Name:     adminName,
-		Password: string(hashedPassword),
-
-		Role:      role,
-		Status:    status,
-		LastLogin: pgtype.Timestamptz{Valid: false},
+		Email:        adminEmail,
+		Name:         adminName,
+		Password:     string(hashedPassword),
+		Role:         role,
+		Status:       status,
+		LastLogin:    pgtype.Timestamptz{Valid: false},
+		AuthProvider: "local",
 	})
 
 	if err != nil {
@@ -435,13 +443,13 @@ func (s *userService) syncLDAPUser(ctx context.Context, entry *ldap.Entry) (*db.
 		hashedPassword, _ := bcrypt.GenerateFromPassword([]byte(dummyPass), bcrypt.DefaultCost)
 
 		createParams := db.CreateUserParams{
-			Email:    email,
-			Name:     name,
-			Password: string(hashedPassword),
-
-			Role:      role,
-			Status:    "active",
-			LastLogin: pgtype.Timestamptz{Valid: true, Time: pgtype.Timestamptz{}.Time},
+			Email:        email,
+			Name:         name,
+			Password:     string(hashedPassword),
+			Role:         role,
+			Status:       "active",
+			LastLogin:    pgtype.Timestamptz{Valid: true, Time: pgtype.Timestamptz{}.Time},
+			AuthProvider: "ldap",
 		}
 
 		err = s.db.CreateUser(ctx, createParams)
@@ -489,13 +497,13 @@ func (s *userService) LoginOIDC(ctx context.Context, email, name string) (*db.Cl
 		hashedPassword, _ := bcrypt.GenerateFromPassword([]byte(dummyPass), bcrypt.DefaultCost)
 
 		createParams := db.CreateUserParams{
-			Email:    email,
-			Name:     name,
-			Password: string(hashedPassword),
-
-			Role:      "user", // Default role
-			Status:    "active",
-			LastLogin: pgtype.Timestamptz{Valid: true, Time: pgtype.Timestamptz{}.Time},
+			Email:        email,
+			Name:         name,
+			Password:     string(hashedPassword),
+			Role:         "user",
+			Status:       "active",
+			LastLogin:    pgtype.Timestamptz{Valid: true, Time: pgtype.Timestamptz{}.Time},
+			AuthProvider: "oidc",
 		}
 
 		err = s.db.CreateUser(ctx, createParams)
@@ -544,6 +552,10 @@ func (s *userService) UpdatePassword(ctx context.Context, userID uuid.UUID, curr
 	user, err := s.db.FindUserById(ctx, userID)
 	if err != nil {
 		return fmt.Errorf("user not found")
+	}
+
+	if user.AuthProvider != "local" {
+		return fmt.Errorf("password change is not available for %s users", user.AuthProvider)
 	}
 
 	// Verify current password

@@ -36,12 +36,14 @@ const Profile = () => {
               )}
             </div>
 
-            <button
-                onClick={() => setIsChangePasswordModalOpen(true)}
-                className="ml-auto px-4 py-2 bg-slate-800/50 hover:bg-slate-700/50 text-white text-sm font-medium rounded-lg border border-slate-700/50 transition-all"
-            >
-                Change Password
-            </button>
+            {(!authData.authProvider || authData.authProvider === "local") && (
+              <button
+                  onClick={() => setIsChangePasswordModalOpen(true)}
+                  className="ml-auto px-4 py-2 bg-slate-800/50 hover:bg-slate-700/50 text-white text-sm font-medium rounded-lg border border-slate-700/50 transition-all"
+              >
+                  Change Password
+              </button>
+            )}
           </div>
         </div>
 

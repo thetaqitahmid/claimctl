@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"net"
 	"net/http"
 	"net/url"
 	"strings"
@@ -21,23 +22,42 @@ import (
 
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/thetaqitahmid/claimctl/internal/db"
+	"github.com/thetaqitahmid/claimctl/internal/utils"
 )
+
+var allowedMethods = map[string]bool{
+	"GET": true, "POST": true, "PUT": true, "PATCH": true, "DELETE": true,
+}
+
+const maxTemplateOutput = 1 << 20 // 1 MB
 
 type WebhookService struct {
 	q             db.Querier
 	secretService *SecretService
 	httpClient    *http.Client
+	encryptionKey string
 }
 
-func NewWebhookService(q db.Querier, secretService *SecretService) *WebhookService {
+func NewWebhookService(q db.Querier, secretService *SecretService, encryptionKey string) *WebhookService {
 	return &WebhookService{
 		q:             q,
 		secretService: secretService,
 		httpClient:    &http.Client{Timeout: 10 * time.Second},
+		encryptionKey: encryptionKey,
 	}
 }
 
-func (s *WebhookService) CreateWebhook(ctx context.Context, name, url, method string, headers map[string]string, tmpl, description string) (db.ClaimctlWebhook, error) {
+func (s *WebhookService) CreateWebhook(ctx context.Context, name, rawURL, method string, headers map[string]string, tmpl, description string) (db.ClaimctlWebhook, error) {
+	if err := validateWebhookURL(rawURL); err != nil {
+		return db.ClaimctlWebhook{}, err
+	}
+	if !allowedMethods[method] {
+		return db.ClaimctlWebhook{}, fmt.Errorf("invalid HTTP method: %s", method)
+	}
+	if err := validateTemplate(tmpl); err != nil {
+		return db.ClaimctlWebhook{}, fmt.Errorf("invalid template: %w", err)
+	}
+
 	headersJSON := []byte("{}")
 	if headers != nil {
 		var err error
@@ -47,31 +67,64 @@ func (s *WebhookService) CreateWebhook(ctx context.Context, name, url, method st
 		}
 	}
 
-	// Generate Signing Secret
 	signingSecretBytes := make([]byte, 32)
-	_, _ = rand.Read(signingSecretBytes) // If this fails, we have bigger problems, but ignoring err for brevity/randomness
+	if _, err := rand.Read(signingSecretBytes); err != nil {
+		return db.ClaimctlWebhook{}, fmt.Errorf("failed to generate signing secret: %w", err)
+	}
 	signingSecret := hex.EncodeToString(signingSecretBytes)
 
-	return s.q.CreateWebhook(ctx, db.CreateWebhookParams{
+	encryptedSecret, err := utils.Encrypt(signingSecret, s.encryptionKey)
+	if err != nil {
+		return db.ClaimctlWebhook{}, fmt.Errorf("failed to encrypt signing secret: %w", err)
+	}
+
+	webhook, err := s.q.CreateWebhook(ctx, db.CreateWebhookParams{
 		Name:          name,
-		Url:           url,
+		Url:           rawURL,
 		Method:        method,
 		Headers:       headersJSON,
 		Template:      pgtype.Text{String: tmpl, Valid: tmpl != ""},
 		Description:   pgtype.Text{String: description, Valid: description != ""},
-		SigningSecret: signingSecret,
+		SigningSecret: "ENC:" + encryptedSecret,
 	})
+	if err != nil {
+		return webhook, err
+	}
+	webhook.SigningSecret = signingSecret
+	return webhook, nil
 }
 
 func (s *WebhookService) GetWebhook(ctx context.Context, id uuid.UUID) (db.ClaimctlWebhook, error) {
-	return s.q.GetWebhook(ctx, id)
+	w, err := s.q.GetWebhook(ctx, id)
+	if err != nil {
+		return w, err
+	}
+	s.decryptWebhookSecret(&w)
+	return w, nil
 }
 
 func (s *WebhookService) ListWebhooks(ctx context.Context) ([]db.ClaimctlWebhook, error) {
-	return s.q.ListWebhooks(ctx)
+	webhooks, err := s.q.ListWebhooks(ctx)
+	if err != nil {
+		return nil, err
+	}
+	for i := range webhooks {
+		webhooks[i].SigningSecret = ""
+	}
+	return webhooks, nil
 }
 
-func (s *WebhookService) UpdateWebhook(ctx context.Context, id uuid.UUID, name, url, method string, headers map[string]string, tmpl, description string) (db.ClaimctlWebhook, error) {
+func (s *WebhookService) UpdateWebhook(ctx context.Context, id uuid.UUID, name, rawURL, method string, headers map[string]string, tmpl, description string) (db.ClaimctlWebhook, error) {
+	if err := validateWebhookURL(rawURL); err != nil {
+		return db.ClaimctlWebhook{}, err
+	}
+	if !allowedMethods[method] {
+		return db.ClaimctlWebhook{}, fmt.Errorf("invalid HTTP method: %s", method)
+	}
+	if err := validateTemplate(tmpl); err != nil {
+		return db.ClaimctlWebhook{}, fmt.Errorf("invalid template: %w", err)
+	}
+
 	headersJSON := []byte("{}")
 	if headers != nil {
 		var err error
@@ -83,7 +136,7 @@ func (s *WebhookService) UpdateWebhook(ctx context.Context, id uuid.UUID, name, 
 	return s.q.UpdateWebhook(ctx, db.UpdateWebhookParams{
 		ID:          id,
 		Name:        name,
-		Url:         url,
+		Url:         rawURL,
 		Method:      method,
 		Headers:     headersJSON,
 		Template:    pgtype.Text{String: tmpl, Valid: tmpl != ""},
@@ -120,6 +173,17 @@ func (s *WebhookService) GetWebhookLogs(ctx context.Context, webhookID uuid.UUID
 		Limit:     limit,
 		Offset:    offset,
 	})
+}
+
+func (s *WebhookService) decryptWebhookSecret(w *db.ClaimctlWebhook) {
+	if strings.HasPrefix(w.SigningSecret, "ENC:") {
+		decrypted, err := utils.Decrypt(strings.TrimPrefix(w.SigningSecret, "ENC:"), s.encryptionKey)
+		if err == nil {
+			w.SigningSecret = decrypted
+		} else {
+			slog.Warn("failed to decrypt webhook signing secret", "webhook_id", w.ID, "error", err)
+		}
+	}
 }
 
 type WebhookPayload struct {
@@ -163,8 +227,9 @@ func (s *WebhookService) TriggerWebhooks(ctx context.Context, resourceID uuid.UU
 		payloadInfo.Reservation = res
 	}
 
-	for _, hook := range webhooks {
-		go s.executeWebhook(context.Background(), hook, payloadInfo)
+	for i := range webhooks {
+		s.decryptWebhookSecret(&webhooks[i])
+		go s.executeWebhook(context.Background(), webhooks[i], payloadInfo)
 	}
 
 	return nil
@@ -182,26 +247,11 @@ func (s *WebhookService) executeWebhook(ctx context.Context, hook db.ClaimctlWeb
 	var body []byte
 	var err error
 	if hook.Template.Valid && hook.Template.String != "" {
-		funcMap := template.FuncMap{
-			"urlquery": url.QueryEscape,
-			"secret": func(key string) string {
-				return payload.Secrets[key]
-			},
-		}
-
-		tmpl, err := template.New("webhook").Funcs(funcMap).Parse(hook.Template.String)
+		body, err = s.executeTemplate(hook, payload)
 		if err != nil {
 			s.logExecution(ctx, hook.ID, payload.Event, 0, "Template Error: "+err.Error(), "", 0)
-			slog.Info("Error parsing template for webhook ", hook.Name, err)
 			return
 		}
-		var buf bytes.Buffer
-		if err := tmpl.Execute(&buf, payload); err != nil {
-			s.logExecution(ctx, hook.ID, payload.Event, 0, "Template Eval Error: "+err.Error(), "", 0)
-			slog.Info("Error executing template for webhook ", hook.Name, err)
-			return
-		}
-		body = buf.Bytes()
 	} else {
 		body, err = json.Marshal(payload)
 		if err != nil {
@@ -219,7 +269,6 @@ func (s *WebhookService) executeWebhook(ctx context.Context, hook db.ClaimctlWeb
 	for attempt := 0; attempt < maxRetries; attempt++ {
 		start := time.Now()
 
-		// Resolve secrets in URL
 		resolvedUrl := s.resolveSecrets(hook.Url, payload.Secrets)
 
 		req, err := http.NewRequest(hook.Method, resolvedUrl, bytes.NewBuffer(body))
@@ -276,6 +325,32 @@ func (s *WebhookService) executeWebhook(ctx context.Context, hook db.ClaimctlWeb
 	s.logExecution(ctx, hook.ID, payload.Event, int32(statusCode), string(body), respBody, int32(duration.Milliseconds()))
 }
 
+func (s *WebhookService) executeTemplate(hook db.ClaimctlWebhook, payload WebhookPayload) ([]byte, error) {
+	funcMap := template.FuncMap{
+		"urlquery": url.QueryEscape,
+		"secret": func(key string) string {
+			return payload.Secrets[key]
+		},
+	}
+
+	tmpl, err := template.New("webhook").Funcs(funcMap).Parse(hook.Template.String)
+	if err != nil {
+		slog.Error("error parsing template for webhook", "name", hook.Name, "error", err)
+		return nil, err
+	}
+
+	var buf bytes.Buffer
+	if err := tmpl.Execute(&buf, payload); err != nil {
+		slog.Error("error executing template for webhook", "name", hook.Name, "error", err)
+		return nil, err
+	}
+
+	if buf.Len() > maxTemplateOutput {
+		return nil, fmt.Errorf("template output exceeds %d byte limit", maxTemplateOutput)
+	}
+	return buf.Bytes(), nil
+}
+
 func (s *WebhookService) logExecution(ctx context.Context, webhookID uuid.UUID, event string, statusCode int32, reqBody, respBody string, duration int32) {
 	_, err := s.q.CreateWebhookLog(ctx, db.CreateWebhookLogParams{
 		WebhookID:    webhookID,
@@ -296,4 +371,43 @@ func (s *WebhookService) resolveSecrets(text string, secrets map[string]string) 
 		text = strings.ReplaceAll(text, placeholder, v)
 	}
 	return text
+}
+
+func validateWebhookURL(rawURL string) error {
+	if rawURL == "" {
+		return fmt.Errorf("url is required")
+	}
+	parsed, err := url.Parse(rawURL)
+	if err != nil {
+		return fmt.Errorf("invalid url: %w", err)
+	}
+	if parsed.Scheme != "http" && parsed.Scheme != "https" {
+		return fmt.Errorf("url must use http or https scheme")
+	}
+	if parsed.Host == "" {
+		return fmt.Errorf("url must have a host")
+	}
+	host := parsed.Hostname()
+	if host == "localhost" || host == "127.0.0.1" || host == "::1" {
+		return fmt.Errorf("url must not point to loopback address")
+	}
+	ip := net.ParseIP(host)
+	if ip != nil {
+		if ip.IsLoopback() || ip.IsPrivate() || ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() {
+			return fmt.Errorf("url must not point to a private or reserved address")
+		}
+	}
+	return nil
+}
+
+func validateTemplate(tmpl string) error {
+	if tmpl == "" {
+		return nil
+	}
+	funcMap := template.FuncMap{
+		"urlquery": url.QueryEscape,
+		"secret":   func(string) string { return "" },
+	}
+	_, err := template.New("validate").Funcs(funcMap).Parse(tmpl)
+	return err
 }

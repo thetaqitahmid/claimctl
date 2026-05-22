@@ -5,8 +5,8 @@ describe('authSlice', () => {
   const initialState = {
     user: null,
     email: null,
-
     role: null,
+    authProvider: null,
   };
 
   it('should return the initial state', () => {
@@ -17,24 +17,24 @@ describe('authSlice', () => {
     const credentials = {
       user: 'testuser',
       email: 'test@example.com',
-
       role: 'admin',
+      authProvider: 'local',
     };
 
     const actual = authReducer(initialState, setCredentials(credentials));
 
     expect(actual.user).toBe('testuser');
     expect(actual.email).toBe('test@example.com');
-
     expect(actual.role).toBe('admin');
+    expect(actual.authProvider).toBe('local');
   });
 
   it('should handle clearCredentials', () => {
     const loggedInState = {
       user: 'testuser',
       email: 'test@example.com',
-
       role: 'admin',
+      authProvider: 'local',
     };
 
     const actual = authReducer(loggedInState, clearCredentials());

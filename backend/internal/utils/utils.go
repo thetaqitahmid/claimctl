@@ -90,10 +90,43 @@ func GenerateRandomString(n int) string {
 	b := make([]byte, n)
 	_, err := rand.Read(b)
 	if err != nil {
-		// Fallback to simpler random if crypto/rand fails (unlikely)
 		return fmt.Sprintf("%d", time.Now().UnixNano())
 	}
 	return base64.URLEncoding.EncodeToString(b)
+}
+
+// GenerateStrongPassword returns a random password guaranteed to contain
+// uppercase, lowercase, digit, and special characters.
+func GenerateStrongPassword(length int) string {
+	if length < 8 {
+		length = 8
+	}
+
+	upper := "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+	lower := "abcdefghijklmnopqrstuvwxyz"
+	digits := "0123456789"
+	special := "@$!%*?&#"
+	all := upper + lower + digits + special
+
+	buf := make([]byte, length)
+	rand.Read(buf)
+
+	password := make([]byte, length)
+	for i := range password {
+		password[i] = all[int(buf[i])%len(all)]
+	}
+
+	password[0] = upper[int(buf[0])%len(upper)]
+	password[1] = lower[int(buf[1])%len(lower)]
+	password[2] = digits[int(buf[2])%len(digits)]
+	password[3] = special[int(buf[3])%len(special)]
+
+	for i := 3; i > 0; i-- {
+		j := int(buf[length-i]) % (i + 1)
+		password[i], password[j] = password[j], password[i]
+	}
+
+	return string(password)
 }
 
 // GetEnvAsBool retrieves an environment variable as a boolean or returns a default value

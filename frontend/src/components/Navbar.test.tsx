@@ -16,10 +16,9 @@ describe("Navbar", () => {
       preloadedState: {
         authSlice: {
           user: "Test User",
-
           email: "test@example.com",
           role: "user",
-
+          authProvider: null,
         },
       },
     });
@@ -31,10 +30,9 @@ describe("Navbar", () => {
       preloadedState: {
         authSlice: {
           user: "Test User",
-
           email: "test@example.com",
           role: "user",
-
+          authProvider: null,
         },
       },
     });
@@ -42,9 +40,7 @@ describe("Navbar", () => {
     const userButton = screen.getByText("Test User");
     fireEvent.click(userButton);
     
-    // t("components:navbar.profile") -> "profile"
     expect(screen.getByText("profile")).toBeInTheDocument();
-    // t("components:navbar.logout") -> "logout"
     expect(screen.getByText("logout")).toBeInTheDocument();
   });
 
@@ -53,10 +49,9 @@ describe("Navbar", () => {
       preloadedState: {
         authSlice: {
           user: "Admin User",
-
           email: "admin@example.com",
           role: "admin",
-
+          authProvider: null,
         },
       },
     });
@@ -64,7 +59,6 @@ describe("Navbar", () => {
     const userButton = screen.getByText("Admin User");
     fireEvent.click(userButton);
     
-    // t("components:navbar.adminPanel") -> "adminPanel"
     expect(screen.getByText("adminPanel")).toBeInTheDocument();
     expect(screen.getByText("secrets")).toBeInTheDocument();
     expect(screen.getByText("webhooks")).toBeInTheDocument();
@@ -76,10 +70,9 @@ describe("Navbar", () => {
       preloadedState: {
         authSlice: {
           user: "Regular User",
-
           email: "test@example.com",
           role: "user",
-
+          authProvider: null,
         },
       },
     });

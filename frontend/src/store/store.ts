@@ -10,6 +10,9 @@ import { settingsApi } from "./api/settings";
 import { preferencesApi } from "./api/preferences";
 import { tokensApiSlice } from "./api/tokens";
 import { groupsApiSlice } from "./api/groups";
+import { secretsApi } from "./api/secrets";
+import { webhooksApi } from "./api/webhooks";
+import { backupApi } from "./api/backup";
 import {
   useDispatch,
   useSelector,
@@ -28,6 +31,9 @@ export const store = configureStore({
     [preferencesApi.reducerPath]: preferencesApi.reducer,
     [tokensApiSlice.reducerPath]: tokensApiSlice.reducer,
     [groupsApiSlice.reducerPath]: groupsApiSlice.reducer,
+    [secretsApi.reducerPath]: secretsApi.reducer,
+    [webhooksApi.reducerPath]: webhooksApi.reducer,
+    [backupApi.reducerPath]: backupApi.reducer,
     authSlice: authSlice,
     resourcesUiSlice: resourcesUiSlice,
   },
@@ -41,7 +47,10 @@ export const store = configureStore({
       .concat(settingsApi.middleware)
       .concat(preferencesApi.middleware)
       .concat(tokensApiSlice.middleware)
-      .concat(groupsApiSlice.middleware);
+      .concat(groupsApiSlice.middleware)
+      .concat(secretsApi.middleware)
+      .concat(webhooksApi.middleware)
+      .concat(backupApi.middleware);
   },
 });
 

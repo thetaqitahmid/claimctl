@@ -3,7 +3,7 @@ package server
 import (
 	"context"
 	"crypto/rsa"
-	"fmt"
+	"log/slog"
 	"time"
 
 	jwtware "github.com/gofiber/contrib/jwt"
@@ -32,7 +32,7 @@ func SetupRoutes(ctx context.Context, app *fiber.App, dbConn *connection.DBConn,
 	settingsService := services.NewSettingsService(dbQueries, encryptionKey)
 	// Auto-sync settings from Env to DB on startup
 	if err := settingsService.SyncEnvToDB(ctx); err != nil {
-		fmt.Printf("Warning: Failed to sync settings from Env: %v\n", err)
+		slog.Warn("failed to sync settings from env", "error", err)
 	}
 
 	dispatchers := []services.NotificationDispatcher{
@@ -48,7 +48,7 @@ func SetupRoutes(ctx context.Context, app *fiber.App, dbConn *connection.DBConn,
 	userService := services.NewUserService(dbQueries)
 	reservationHistoryService := services.NewReservationHistoryService(dbQueries)
 	secretService := services.NewSecretService(dbQueries, encryptionKey)
-	webhookService := services.NewWebhookService(dbQueries, secretService)
+	webhookService := services.NewWebhookService(dbQueries, secretService, encryptionKey)
 	apiTokenService := services.NewAPITokenService(dbQueries)
 	preferenceHandler := handlers.NewPreferenceHandler(preferenceService)
 	backupHandler := handlers.NewBackupHandler(backupService)
@@ -65,7 +65,7 @@ func SetupRoutes(ctx context.Context, app *fiber.App, dbConn *connection.DBConn,
 
 	// Start health check monitoring
 	if err := healthCheckService.StartMonitoring(ctx); err != nil {
-		fmt.Printf("Warning: Failed to start health check monitoring: %v\n", err)
+		slog.Warn("failed to start health check monitoring", "error", err)
 	}
 
 	// Start Cleanup Worker
@@ -144,7 +144,7 @@ func SetupRoutes(ctx context.Context, app *fiber.App, dbConn *connection.DBConn,
 		},
 		TokenLookup: "cookie:access_token,header:Authorization",
 		ErrorHandler: func(c *fiber.Ctx, err error) error {
-			fmt.Println("JWT Error:", err)
+			slog.Warn("JWT authentication failed", "error", err)
 			return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
 				"error": "Unauthorized",
 			})

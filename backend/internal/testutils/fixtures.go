@@ -72,30 +72,31 @@ func CreateTestUser(id uuid.UUID, email, name string, admin bool) db.ClaimctlUse
 		role = "admin"
 	}
 	return db.ClaimctlUser{
-		ID:        id,
-		Email:     email,
-		Name:      name,
-		Password:  "$2a$10$hashedPassword",
-		Role:      role,
-		Status:    "active",
-		LastLogin: pgtype.Timestamptz{Valid: false},
-		CreatedAt: pgtype.Timestamptz{Time: time.Now(), Valid: true},
-		UpdatedAt: pgtype.Timestamptz{Time: time.Now(), Valid: true},
+		ID:           id,
+		Email:        email,
+		Name:         name,
+		Password:     "$2a$10$hashedPassword",
+		Role:         role,
+		Status:       "active",
+		LastLogin:    pgtype.Timestamptz{Valid: false},
+		CreatedAt:    pgtype.Timestamptz{Time: time.Now(), Valid: true},
+		UpdatedAt:    pgtype.Timestamptz{Time: time.Now(), Valid: true},
+		AuthProvider: "local",
 	}
 }
 
 func CreateTestAdminUser(id uuid.UUID) db.ClaimctlUser {
 	return db.ClaimctlUser{
-		ID:       id,
-		Email:    "admin@test.com",
-		Name:     "Admin User",
-		Password: "$2a$10$hashedPassword",
-
-		Role:      "admin",
-		Status:    "active",
-		LastLogin: pgtype.Timestamptz{Valid: false},
-		CreatedAt: pgtype.Timestamptz{Time: time.Now(), Valid: true},
-		UpdatedAt: pgtype.Timestamptz{Time: time.Now(), Valid: true},
+		ID:           id,
+		Email:        "admin@test.com",
+		Name:         "Admin User",
+		Password:     "$2a$10$hashedPassword",
+		Role:         "admin",
+		Status:       "active",
+		LastLogin:    pgtype.Timestamptz{Valid: false},
+		CreatedAt:    pgtype.Timestamptz{Time: time.Now(), Valid: true},
+		UpdatedAt:    pgtype.Timestamptz{Time: time.Now(), Valid: true},
+		AuthProvider: "local",
 	}
 }
 

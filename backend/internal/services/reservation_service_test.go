@@ -70,7 +70,7 @@ func TestReservationService_CreateReservation(t *testing.T) {
 	mockDB := &testutils.MockQuerier{}
 	mockHistory := &testutils.MockReservationHistoryService{}
 	secretSvc := NewSecretService(mockDB, "MTIzNDU2Nzg5MDEyMzQ1Njc4OTAxMjM0NTY3ODkwMTI=")
-	webhookSvc := NewWebhookService(mockDB, secretSvc)
+	webhookSvc := NewWebhookService(mockDB, secretSvc, "")
 	mockDB.On("GetWebhooksForEvent", ctx, mock.Anything).Return(nil, nil).Maybe()
 	mockRealtime := &MockRealtimeService{}
 	mockNotification := &MockNotificationService{}
@@ -170,7 +170,7 @@ func TestReservationService_ActivateReservation(t *testing.T) {
 	mockDB := &testutils.MockQuerier{}
 	mockHistory := &testutils.MockReservationHistoryService{}
 	secretSvc := NewSecretService(mockDB, "MTIzNDU2Nzg5MDEyMzQ1Njc4OTAxMjM0NTY3ODkwMTI=")
-	webhookSvc := NewWebhookService(mockDB, secretSvc)
+	webhookSvc := NewWebhookService(mockDB, secretSvc, "")
 	mockDB.On("GetWebhooksForEvent", ctx, mock.Anything).Return(nil, nil).Maybe()
 	mockRealtime := &MockRealtimeService{}
 	mockNotification := &MockNotificationService{}
@@ -293,7 +293,7 @@ func TestReservationService_CompleteReservation(t *testing.T) {
 	mockDB := &testutils.MockQuerier{}
 	mockHistory := &testutils.MockReservationHistoryService{}
 	secretSvc := NewSecretService(mockDB, "MTIzNDU2Nzg5MDEyMzQ1Njc4OTAxMjM0NTY3ODkwMTI=")
-	webhookSvc := NewWebhookService(mockDB, secretSvc)
+	webhookSvc := NewWebhookService(mockDB, secretSvc, "")
 	mockDB.On("GetWebhooksForEvent", ctx, mock.Anything).Return(nil, nil).Maybe()
 	mockRealtime := &MockRealtimeService{}
 	mockNotification := &MockNotificationService{}
@@ -443,7 +443,7 @@ func TestReservationService_CancelReservation(t *testing.T) {
 	mockDB := &testutils.MockQuerier{}
 	mockHistory := &testutils.MockReservationHistoryService{}
 	secretSvc := NewSecretService(mockDB, "MTIzNDU2Nzg5MDEyMzQ1Njc4OTAxMjM0NTY3ODkwMTI=")
-	webhookSvc := NewWebhookService(mockDB, secretSvc)
+	webhookSvc := NewWebhookService(mockDB, secretSvc, "")
 	mockDB.On("GetWebhooksForEvent", ctx, mock.Anything).Return(nil, nil).Maybe()
 	mockRealtime := &MockRealtimeService{}
 	mockNotification := &MockNotificationService{}
@@ -581,7 +581,7 @@ func TestReservationService_GetReservation(t *testing.T) {
 	mockDB := &testutils.MockQuerier{}
 	mockHistory := &testutils.MockReservationHistoryService{}
 	secretSvc := NewSecretService(mockDB, "MTIzNDU2Nzg5MDEyMzQ1Njc4OTAxMjM0NTY3ODkwMTI=")
-	webhookSvc := NewWebhookService(mockDB, secretSvc)
+	webhookSvc := NewWebhookService(mockDB, secretSvc, "")
 	mockDB.On("GetWebhooksForEvent", ctx, mock.Anything).Return(nil, nil).Maybe()
 	mockRealtime := &MockRealtimeService{}
 	mockNotification := &MockNotificationService{}
@@ -642,7 +642,7 @@ func TestReservationService_GetUserReservations(t *testing.T) {
 	mockDB := &testutils.MockQuerier{}
 	mockHistory := &testutils.MockReservationHistoryService{}
 	secretSvc := NewSecretService(mockDB, "MTIzNDU2Nzg5MDEyMzQ1Njc4OTAxMjM0NTY3ODkwMTI=")
-	webhookSvc := NewWebhookService(mockDB, secretSvc)
+	webhookSvc := NewWebhookService(mockDB, secretSvc, "")
 	mockDB.On("GetWebhooksForEvent", ctx, mock.Anything).Return(nil, nil).Maybe()
 	mockRealtime := &MockRealtimeService{}
 	mockNotification := &MockNotificationService{}
@@ -709,7 +709,7 @@ func TestReservationService_ProcessQueue(t *testing.T) {
 	mockDB := &testutils.MockQuerier{}
 	mockHistory := &testutils.MockReservationHistoryService{}
 	secretSvc := NewSecretService(mockDB, "MTIzNDU2Nzg5MDEyMzQ1Njc4OTAxMjM0NTY3ODkwMTI=")
-	webhookSvc := NewWebhookService(mockDB, secretSvc)
+	webhookSvc := NewWebhookService(mockDB, secretSvc, "")
 	mockDB.On("GetWebhooksForEvent", ctx, mock.Anything).Return(nil, nil).Maybe()
 	mockRealtime := &MockRealtimeService{}
 	mockNotification := &MockNotificationService{}
@@ -803,7 +803,7 @@ func TestReservationService_GetUserQueuePosition(t *testing.T) {
 	mockDB := &testutils.MockQuerier{}
 	mockHistory := &testutils.MockReservationHistoryService{}
 	secretSvc := NewSecretService(mockDB, "MTIzNDU2Nzg5MDEyMzQ1Njc4OTAxMjM0NTY3ODkwMTI=")
-	webhookSvc := NewWebhookService(mockDB, secretSvc)
+	webhookSvc := NewWebhookService(mockDB, secretSvc, "")
 	mockDB.On("GetWebhooksForEvent", ctx, mock.Anything).Return(nil, nil).Maybe()
 	mockRealtime := &MockRealtimeService{}
 	mockNotification := &MockNotificationService{}

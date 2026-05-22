@@ -2,8 +2,8 @@ package handlers
 
 import (
 	"crypto/rsa"
-	"fmt"
 	"net/mail"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -153,12 +153,12 @@ func (h *UserHandler) Login(c *fiber.Ctx) error {
 
 	return c.JSON(fiber.Map{
 		"user": fiber.Map{
-			"id":    user.ID,
-			"email": user.Email,
-			"name":  user.Name,
-
-			"role":   user.Role,
-			"status": user.Status,
+			"id":           user.ID,
+			"email":        user.Email,
+			"name":         user.Name,
+			"role":         user.Role,
+			"status":       user.Status,
+			"auth_provider": user.AuthProvider,
 		},
 		"message": "Login successful",
 	})
@@ -194,15 +194,15 @@ func (h *UserHandler) GetMe(c *fiber.Ctx) error {
 	if err != nil {
 		return utils.SendError(c, fiber.StatusUnauthorized, "Unauthorized", err)
 	}
-	fmt.Println("User is authenticated")
 	return c.JSON(fiber.Map{
 		"user": fiber.Map{
-			"id":    user.ID,
-			"email": user.Email,
-			"name":  user.Name,
+			"id":            user.ID,
+			"email":         user.Email,
+			"name":          user.Name,
 
 			"role":               user.Role,
 			"status":             user.Status,
+			"auth_provider":      user.AuthProvider,
 			"slack_destination":  user.SlackDestination.String,
 			"teams_webhook_url":  user.TeamsWebhookUrl.String,
 			"notification_email": user.NotificationEmail.String,
@@ -246,11 +246,12 @@ func (h *UserHandler) CreateUser(c *fiber.Ctx) error {
 	}
 
 	user := db.CreateUserParams{
-		Email: req.Email,
-		Name: req.Name,
-		Password: req.Password,
-		Role: req.Role,
-		Status: req.Status,
+		Email:        req.Email,
+		Name:         req.Name,
+		Password:     req.Password,
+		Role:         req.Role,
+		Status:       req.Status,
+		AuthProvider: "local",
 	}
 
 	createdUser, err := h.userService.CreateUser(c.Context(), user)
@@ -355,7 +356,8 @@ func (h *UserHandler) UpdateUser(c *fiber.Ctx) error {
 		return utils.SendError(c, fiber.StatusInternalServerError, "Failed to update user", err)
 	}
 
-	if user.Status != nil && *user.Status == "disabled" {
+	if (user.Status != nil && *user.Status == "disabled") ||
+		(user.Password != nil && len(*user.Password) > 0) {
 		_ = h.refreshTokenService.RevokeAllByUser(c.Context(), idValue)
 	}
 
@@ -378,6 +380,8 @@ func (h *UserHandler) DeleteUser(c *fiber.Ctx) error {
 	if err != nil {
 		return nil
 	}
+
+	_ = h.refreshTokenService.RevokeAllByUser(c.Context(), id)
 
 	err = h.userService.DeleteUser(c.Context(), id)
 	if err != nil {
@@ -458,12 +462,12 @@ func (h *UserHandler) LoginLDAP(c *fiber.Ctx) error {
 
 	return c.JSON(fiber.Map{
 		"user": fiber.Map{
-			"id":    user.ID,
-			"email": user.Email,
-			"name":  user.Name,
-
-			"role":   user.Role,
-			"status": user.Status,
+			"id":            user.ID,
+			"email":         user.Email,
+			"name":          user.Name,
+			"role":          user.Role,
+			"status":        user.Status,
+			"auth_provider": user.AuthProvider,
 		},
 		"message": "Login successful",
 	})
@@ -672,10 +676,19 @@ func (h *UserHandler) HandleChangePassword(c *fiber.Ctx) error {
 		if err.Error() == "user not found" {
 			return utils.SendError(c, fiber.StatusNotFound, "User not found", err)
 		}
+		if strings.HasPrefix(err.Error(), "password change is not available") {
+			return utils.SendError(c, fiber.StatusForbidden, err.Error(), err)
+		}
 		return utils.SendError(c, fiber.StatusBadRequest, err.Error(), err)
 	}
 
 	_ = h.refreshTokenService.RevokeAllByUser(c.Context(), user.ID)
+
+	expired := time.Now().Add(-1 * time.Hour)
+	secure := utils.GetEnvAsBool("COOKIE_SECURE", true)
+	sameSite := utils.GetEnv("COOKIE_SAMESITE", "Strict")
+	c.Cookie(&fiber.Cookie{Name: "access_token", Value: "", Expires: expired, HTTPOnly: true, Secure: secure, SameSite: sameSite, Path: "/"})
+	c.Cookie(&fiber.Cookie{Name: "refresh_token", Value: "", Expires: expired, HTTPOnly: true, Secure: secure, SameSite: sameSite, Path: "/"})
 
 	return c.JSON(fiber.Map{
 		"message": "Password updated successfully",

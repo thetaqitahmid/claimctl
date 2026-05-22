@@ -52,12 +52,12 @@ export interface UserProps {
   id: string;
   email: string;
   name: string;
-
   role: string;
   lastLogin?: string;
   status: string;
   createdAt?: string;
   updatedAt?: string;
+  authProvider?: string;
 }
 
 export interface UserReservation {

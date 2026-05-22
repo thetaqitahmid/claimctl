@@ -730,3 +730,113 @@ func TestUserService_GetUsers(t *testing.T) {
 		})
 	}
 }
+
+func TestUserService_UpdatePassword(t *testing.T) {
+	ctx := testutils.TestContext()
+	mockDB := &testutils.MockQuerier{}
+	service := NewUserService(mockDB)
+
+	tests := []struct {
+		name            string
+		userID          uuid.UUID
+		currentPassword string
+		newPassword     string
+		mockSetup       func()
+		expectedError   string
+		shouldSucceed   bool
+	}{
+		{
+			name:            "Local user - successful password change",
+			userID:          testutils.TestUUID(1),
+			currentPassword: "OldPass1!",
+			newPassword:     "NewPass1!",
+			mockSetup: func() {
+				user := testutils.CreateTestUser(testutils.TestUUID(1), "test@example.com", "Test User", false)
+				mockDB.On("FindUserById", ctx, testutils.TestUUID(1)).Return(user, nil)
+				mockDB.On("GetPasswordById", ctx, testutils.TestUUID(1)).Return("$2a$10$O0ifkKjMGoT0hBq2kMUhAuwsBLfGd8/y3J6Q0yqylfs6bi8Zs8xZ6", nil)
+				mockDB.On("UpdateUserPassword", ctx, mock.MatchedBy(func(arg db.UpdateUserPasswordParams) bool {
+					return arg.ID == testutils.TestUUID(1)
+				})).Return(nil)
+			},
+			shouldSucceed: true,
+		},
+		{
+			name:            "LDAP user - password change blocked",
+			userID:          testutils.TestUUID(2),
+			currentPassword: "OldPass1!",
+			newPassword:     "NewPass1!",
+			mockSetup: func() {
+				user := testutils.CreateTestUser(testutils.TestUUID(2), "ldap@example.com", "LDAP User", false)
+				user.AuthProvider = "ldap"
+				mockDB.On("FindUserById", ctx, testutils.TestUUID(2)).Return(user, nil)
+			},
+			expectedError: "password change is not available for ldap users",
+		},
+		{
+			name:            "OIDC user - password change blocked",
+			userID:          testutils.TestUUID(3),
+			currentPassword: "OldPass1!",
+			newPassword:     "NewPass1!",
+			mockSetup: func() {
+				user := testutils.CreateTestUser(testutils.TestUUID(3), "oidc@example.com", "OIDC User", false)
+				user.AuthProvider = "oidc"
+				mockDB.On("FindUserById", ctx, testutils.TestUUID(3)).Return(user, nil)
+			},
+			expectedError: "password change is not available for oidc users",
+		},
+		{
+			name:            "User not found",
+			userID:          testutils.TestUUID(4),
+			currentPassword: "OldPass1!",
+			newPassword:     "NewPass1!",
+			mockSetup: func() {
+				mockDB.On("FindUserById", ctx, testutils.TestUUID(4)).Return(db.ClaimctlUser{}, assert.AnError)
+			},
+			expectedError: "user not found",
+		},
+		{
+			name:            "Incorrect current password",
+			userID:          testutils.TestUUID(5),
+			currentPassword: "WrongPass1!",
+			newPassword:     "NewPass1!",
+			mockSetup: func() {
+				user := testutils.CreateTestUser(testutils.TestUUID(5), "test2@example.com", "Test User 2", false)
+				mockDB.On("FindUserById", ctx, testutils.TestUUID(5)).Return(user, nil)
+				mockDB.On("GetPasswordById", ctx, testutils.TestUUID(5)).Return("$2a$10$V0k3CYWOGRCJgIkaDCQW/.txz8VEmJKnYGp.JH0qjx7nM5qIqUeHS", nil)
+			},
+			expectedError: "incorrect current password",
+		},
+		{
+			name:            "Weak new password",
+			userID:          testutils.TestUUID(6),
+			currentPassword: "OldPass1!",
+			newPassword:     "weak",
+			mockSetup: func() {
+				user := testutils.CreateTestUser(testutils.TestUUID(6), "test3@example.com", "Test User 3", false)
+				mockDB.On("FindUserById", ctx, testutils.TestUUID(6)).Return(user, nil)
+				mockDB.On("GetPasswordById", ctx, testutils.TestUUID(6)).Return("$2a$10$O0ifkKjMGoT0hBq2kMUhAuwsBLfGd8/y3J6Q0yqylfs6bi8Zs8xZ6", nil)
+			},
+			expectedError: "New password must be at least 8 characters",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			mockDB.ExpectedCalls = nil
+			tt.mockSetup()
+
+			err := service.UpdatePassword(ctx, tt.userID, tt.currentPassword, tt.newPassword)
+
+			if tt.shouldSucceed {
+				require.NoError(t, err)
+			} else {
+				assert.Error(t, err)
+				if tt.expectedError != "" {
+					assert.Contains(t, err.Error(), tt.expectedError)
+				}
+			}
+
+			mockDB.AssertExpectations(t)
+		})
+	}
+}

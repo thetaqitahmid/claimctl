@@ -4,12 +4,14 @@ interface CredentialsPayload {
   user: string | null;
   email: string | null;
   role: string | null;
+  authProvider: string | null;
 }
 
 const initialState: CredentialsPayload = {
   user: null,
   email: null,
   role: null,
+  authProvider: null,
 };
 
 const authSlice = createSlice({
@@ -17,15 +19,17 @@ const authSlice = createSlice({
   initialState,
   reducers: {
     setCredentials: (state, action: PayloadAction<CredentialsPayload>) => {
-      const { user, email, role } = action.payload;
+      const { user, email, role, authProvider } = action.payload;
       state.user = user;
       state.email = email;
       state.role = role;
+      state.authProvider = authProvider;
     },
     clearCredentials: (state) => {
       state.user = null;
       state.email = null;
       state.role = null;
+      state.authProvider = null;
     },
   },
 });

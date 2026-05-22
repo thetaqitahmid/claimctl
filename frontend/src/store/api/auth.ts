@@ -11,12 +11,12 @@ export interface User {
   id: string;
   email: string;
   name: string;
-
   role: string;
   lastLogin?: string;
   status: string;
   createdAt?: string;
   updatedAt?: string;
+  authProvider?: string;
 }
 
 export interface CreateUserRequest {
@@ -80,8 +80,8 @@ export const authApiSlice = createApi({
             setCredentials({
               email: user.email,
               user: user.name,
-
               role: user.role,
+              authProvider: user.authProvider ?? null,
             })
           );
         } catch (error) {

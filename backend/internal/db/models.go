@@ -178,6 +178,7 @@ type ClaimctlUser struct {
 	SlackDestination    pgtype.Text        `json:"slackDestination"`
 	TeamsWebhookUrl     pgtype.Text        `json:"teamsWebhookUrl"`
 	NotificationEmail   pgtype.Text        `json:"notificationEmail"`
+	AuthProvider        string             `json:"authProvider"`
 }
 
 type ClaimctlUserNotificationPreference struct {

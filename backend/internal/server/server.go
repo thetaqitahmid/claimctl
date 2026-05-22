@@ -23,7 +23,11 @@ type Server struct {
 
 // NewServer creates a new server
 func NewServer(ctx context.Context, db *connection.DBConn, privateKey *rsa.PrivateKey, publicKey *rsa.PublicKey, encryptionKey string) *Server {
-	app := fiber.New()
+	app := fiber.New(fiber.Config{
+		// 16KB buffer to accommodate large cookie payloads
+		// (access + refresh tokens in HTTP-only cookies)
+		ReadBufferSize: 16384,
+	})
 	app.Use(otelfiber.Middleware())
 
 	// CORS Configuration

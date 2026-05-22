@@ -8,7 +8,7 @@ SELECT * FROM claimctl.users WHERE id=$1;
 SELECT * FROM claimctl.users WHERE email=$1;
 
 -- name: CreateUser :exec
-INSERT INTO claimctl.users (email, name, password, role, status, last_login) VALUES ($1, $2, $3, $4, $5, $6);
+INSERT INTO claimctl.users (email, name, password, role, status, last_login, auth_provider) VALUES ($1, $2, $3, $4, $5, $6, $7);
 
 -- name: GetPasswordById :one
 SELECT password FROM claimctl.users WHERE id=$1;

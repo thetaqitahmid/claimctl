@@ -9,9 +9,16 @@ import {
   Database,
 } from "lucide-react";
 import { useAppSelector } from "../store/store";
+import {
+  useCreateBackupMutation,
+  useRestoreBackupMutation,
+} from "../store/api/backup";
 
 const BackupRestore: React.FC = () => {
   const authData = useAppSelector((state) => state.authSlice);
+  const [createBackup] = useCreateBackupMutation();
+  const [restoreBackup] = useRestoreBackupMutation();
+
   const [restoreStatus, setRestoreStatus] = useState<
     "idle" | "uploading" | "success" | "error"
   >("idle");
@@ -30,13 +37,7 @@ const BackupRestore: React.FC = () => {
   const handleBackup = async () => {
     setBackupStatus("downloading");
     try {
-      const response = await fetch("/api/admin/backup", {
-        credentials: "include",
-      });
-      if (!response.ok) {
-        throw new Error(`Backup failed: ${response.statusText}`);
-      }
-      const blob = await response.blob();
+      const blob = await createBackup().unwrap();
       const url = window.URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url;
@@ -71,28 +72,17 @@ const BackupRestore: React.FC = () => {
     setRestoreStatus("uploading");
 
     try {
-      const formData = new FormData();
-      formData.append("file", selectedFile);
-
-      const response = await fetch("/api/admin/restore", {
-        method: "POST",
-        credentials: "include",
-        body: formData,
-      });
-
-      const data = await response.json();
-
-      if (!response.ok) {
-        throw new Error(data.error || "Restore failed");
-      }
-
+      const data = await restoreBackup({ file: selectedFile }).unwrap();
       setRestoreStatus("success");
       setRestoreMessage(data.message || "Backup restored successfully");
       setSelectedFile(null);
       if (fileInputRef.current) fileInputRef.current.value = "";
     } catch (err: unknown) {
       setRestoreStatus("error");
-      setRestoreMessage(err instanceof Error ? err.message : "Restore failed");
+      const message =
+        (err as { data?: { error?: string } })?.data?.error ||
+        (err instanceof Error ? err.message : "Restore failed");
+      setRestoreMessage(message);
     }
   };
 
@@ -104,7 +94,6 @@ const BackupRestore: React.FC = () => {
 
   return (
     <div className="space-y-6">
-      {/* Backup Section */}
       <div className="glass-panel rounded-xl p-6 border border-slate-700/50">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-3">
@@ -149,7 +138,6 @@ const BackupRestore: React.FC = () => {
         </div>
       </div>
 
-      {/* Restore Section */}
       <div className="glass-panel rounded-xl p-6 border border-slate-700/50">
         <div className="flex items-center gap-3 mb-4">
           <div className="p-2 rounded-lg bg-amber-500/10">
@@ -180,7 +168,6 @@ const BackupRestore: React.FC = () => {
           </label>
         </div>
 
-        {/* Status Messages */}
         {restoreStatus === "uploading" && (
           <div className="mt-4 flex items-center gap-2 text-cyan-400 text-sm">
             <Loader2 className="w-4 h-4 animate-spin" />
@@ -200,7 +187,6 @@ const BackupRestore: React.FC = () => {
           </div>
         )}
 
-        {/* Warning */}
         <div className="mt-4 p-3 rounded-lg bg-amber-500/5 border border-amber-500/20">
           <div className="flex items-start gap-2">
             <AlertTriangle className="w-4 h-4 text-amber-400 mt-0.5 shrink-0" />
@@ -213,7 +199,6 @@ const BackupRestore: React.FC = () => {
         </div>
       </div>
 
-      {/* Confirmation Modal */}
       {showConfirm && (
         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center">
           <div className="glass-panel rounded-2xl p-6 max-w-md w-full mx-4 border border-slate-700/50">

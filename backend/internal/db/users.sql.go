@@ -24,16 +24,17 @@ func (q *Queries) CountAdminUsers(ctx context.Context) (int64, error) {
 }
 
 const createUser = `-- name: CreateUser :exec
-INSERT INTO claimctl.users (email, name, password, role, status, last_login) VALUES ($1, $2, $3, $4, $5, $6)
+INSERT INTO claimctl.users (email, name, password, role, status, last_login, auth_provider) VALUES ($1, $2, $3, $4, $5, $6, $7)
 `
 
 type CreateUserParams struct {
-	Email     string             `json:"email"`
-	Name      string             `json:"name"`
-	Password  string             `json:"password"`
-	Role      string             `json:"role"`
-	Status    string             `json:"status"`
-	LastLogin pgtype.Timestamptz `json:"lastLogin"`
+	Email        string             `json:"email"`
+	Name         string             `json:"name"`
+	Password     string             `json:"password"`
+	Role         string             `json:"role"`
+	Status       string             `json:"status"`
+	LastLogin    pgtype.Timestamptz `json:"lastLogin"`
+	AuthProvider string             `json:"authProvider"`
 }
 
 func (q *Queries) CreateUser(ctx context.Context, arg CreateUserParams) error {
@@ -44,6 +45,7 @@ func (q *Queries) CreateUser(ctx context.Context, arg CreateUserParams) error {
 		arg.Role,
 		arg.Status,
 		arg.LastLogin,
+		arg.AuthProvider,
 	)
 	return err
 }
@@ -58,7 +60,7 @@ func (q *Queries) DeleteUserById(ctx context.Context, id uuid.UUID) error {
 }
 
 const findAllUsers = `-- name: FindAllUsers :many
-SELECT id, email, name, password, created_at, updated_at, role, status, last_login, failed_login_attempts, locked_until, slack_destination, teams_webhook_url, notification_email FROM claimctl.users
+SELECT id, email, name, password, created_at, updated_at, role, status, last_login, failed_login_attempts, locked_until, slack_destination, teams_webhook_url, notification_email, auth_provider FROM claimctl.users
 `
 
 func (q *Queries) FindAllUsers(ctx context.Context) ([]ClaimctlUser, error) {
@@ -85,6 +87,7 @@ func (q *Queries) FindAllUsers(ctx context.Context) ([]ClaimctlUser, error) {
 			&i.SlackDestination,
 			&i.TeamsWebhookUrl,
 			&i.NotificationEmail,
+			&i.AuthProvider,
 		); err != nil {
 			return nil, err
 		}
@@ -97,7 +100,7 @@ func (q *Queries) FindAllUsers(ctx context.Context) ([]ClaimctlUser, error) {
 }
 
 const findUserByEmail = `-- name: FindUserByEmail :one
-SELECT id, email, name, password, created_at, updated_at, role, status, last_login, failed_login_attempts, locked_until, slack_destination, teams_webhook_url, notification_email FROM claimctl.users WHERE email=$1
+SELECT id, email, name, password, created_at, updated_at, role, status, last_login, failed_login_attempts, locked_until, slack_destination, teams_webhook_url, notification_email, auth_provider FROM claimctl.users WHERE email=$1
 `
 
 func (q *Queries) FindUserByEmail(ctx context.Context, email string) (ClaimctlUser, error) {
@@ -118,12 +121,13 @@ func (q *Queries) FindUserByEmail(ctx context.Context, email string) (ClaimctlUs
 		&i.SlackDestination,
 		&i.TeamsWebhookUrl,
 		&i.NotificationEmail,
+		&i.AuthProvider,
 	)
 	return i, err
 }
 
 const findUserById = `-- name: FindUserById :one
-SELECT id, email, name, password, created_at, updated_at, role, status, last_login, failed_login_attempts, locked_until, slack_destination, teams_webhook_url, notification_email FROM claimctl.users WHERE id=$1
+SELECT id, email, name, password, created_at, updated_at, role, status, last_login, failed_login_attempts, locked_until, slack_destination, teams_webhook_url, notification_email, auth_provider FROM claimctl.users WHERE id=$1
 `
 
 func (q *Queries) FindUserById(ctx context.Context, id uuid.UUID) (ClaimctlUser, error) {
@@ -144,6 +148,7 @@ func (q *Queries) FindUserById(ctx context.Context, id uuid.UUID) (ClaimctlUser,
 		&i.SlackDestination,
 		&i.TeamsWebhookUrl,
 		&i.NotificationEmail,
+		&i.AuthProvider,
 	)
 	return i, err
 }

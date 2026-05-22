@@ -37,8 +37,8 @@ const LoginPage = () => {
         setCredentials({
           user: response.user.name,
           email: response.user.email,
-
           role: response.user.role,
+          authProvider: response.user.auth_provider ?? null,
         })
       );
       navigate("/", { replace: true });

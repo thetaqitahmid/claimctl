@@ -38,7 +38,7 @@ const LoginPage = () => {
           user: response.user.name,
           email: response.user.email,
           role: response.user.role,
-          authProvider: response.user.auth_provider ?? null,
+          authProvider: response.user.authProvider ?? null,
         })
       );
       navigate("/", { replace: true });

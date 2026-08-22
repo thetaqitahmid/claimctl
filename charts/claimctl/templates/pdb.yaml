@@ -7,7 +7,11 @@ metadata:
     {{- include "claimctl.labels" . | nindent 4 }}
     app.kubernetes.io/component: backend
 spec:
+  {{- if .Values.backend.pdb.maxUnavailable }}
+  maxUnavailable: {{ .Values.backend.pdb.maxUnavailable }}
+  {{- else }}
   minAvailable: {{ .Values.backend.pdb.minAvailable }}
+  {{- end }}
   selector:
     matchLabels:
       {{- include "claimctl.selectorLabels" . | nindent 6 }}
@@ -23,7 +27,11 @@ metadata:
     {{- include "claimctl.labels" . | nindent 4 }}
     app.kubernetes.io/component: frontend
 spec:
+  {{- if .Values.frontend.pdb.maxUnavailable }}
+  maxUnavailable: {{ .Values.frontend.pdb.maxUnavailable }}
+  {{- else }}
   minAvailable: {{ .Values.frontend.pdb.minAvailable }}
+  {{- end }}
   selector:
     matchLabels:
       {{- include "claimctl.selectorLabels" . | nindent 6 }}

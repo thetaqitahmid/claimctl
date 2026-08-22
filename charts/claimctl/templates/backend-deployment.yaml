@@ -1,3 +1,4 @@
+{{- include "claimctl.assertValues" . }}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -9,10 +10,15 @@ metadata:
     app.kubernetes.io/managed-by: {{ .Release.Service }}
     app.kubernetes.io/component: backend
 spec:
+  {{- if not .Values.backend.autoscaling.enabled }}
   replicas: {{ .Values.backend.replicaCount }}
+  {{- end }}
   {{- with .Values.backend.strategy }}
   strategy:
     {{- toYaml . | nindent 4 }}
+  {{- end }}
+  {{- with .Values.backend.revisionHistoryLimit }}
+  revisionHistoryLimit: {{ . }}
   {{- end }}
   selector:
     matchLabels:
@@ -21,28 +27,56 @@ spec:
       app.kubernetes.io/component: backend
   template:
     metadata:
-      {{- with .Values.backend.podAnnotations }}
       annotations:
+        {{- if include "claimctl.isManagedDatabaseSecret" . }}
+        checksum/db-secret: {{ include (print $.Template.BasePath "/secret.yaml") . | sha256sum }}
+        {{- end }}
+        {{- with .Values.backend.podAnnotations }}
         {{- toYaml . | nindent 8 }}
-      {{- end }}
+        {{- end }}
       labels:
         app.kubernetes.io/name: {{ include "claimctl.name" . }}
         app.kubernetes.io/instance: {{ .Release.Name }}
         app.kubernetes.io/component: backend
+        {{- with .Values.backend.podLabels }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
     spec:
       {{- with .Values.imagePullSecrets }}
       imagePullSecrets:
         {{- toYaml . | nindent 8 }}
       {{- end }}
       serviceAccountName: {{ include "claimctl.serviceAccountName" . }}
+      automountServiceAccountToken: {{ and .Values.keyGeneration.enabled (not .Values.appEncryption.existingSecret) }}
+      {{- with .Values.backend.podSecurityContext }}
+      securityContext:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.backend.priorityClassName }}
+      priorityClassName: {{ . }}
+      {{- end }}
+      {{- with .Values.backend.topologySpreadConstraints }}
+      topologySpreadConstraints:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
       initContainers:
         {{- if .Values.backend.waitForDb.enabled }}
         - name: wait-for-db
           image: "{{ .Values.backend.waitForDb.image.repository }}:{{ .Values.backend.waitForDb.image.tag }}"
           imagePullPolicy: {{ .Values.backend.waitForDb.image.pullPolicy }}
-          command: ['sh', '-c', 'until pg_isready -h {{ if .Values.postgres.enabled }}{{ printf "%s-postgres" .Release.Name }}{{ else }}{{ .Values.db.host }}{{ end }} -p {{ .Values.db.port }} -U {{ if .Values.postgres.enabled }}{{ .Values.postgres.userDatabase.user.value }}{{ else }}{{ .Values.db.user }}{{ end }}; do echo waiting for database; sleep 2; done;']
+          command: ['sh', '-c', 'until pg_isready -h ${DB_HOST} -p ${DB_PORT} -U ${DB_USER}; do echo waiting for database; sleep 2; done;']
+          env:
+            - name: DB_HOST
+              value: {{ if .Values.postgres.enabled }}{{ include "claimctl.postgresHost" . | quote }}{{ else }}{{ .Values.db.host | quote }}{{ end }}
+            - name: DB_PORT
+              value: {{ .Values.db.port | quote }}
+            - name: DB_USER
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "claimctl.databaseSecretName" . }}
+                  key: {{ include "claimctl.databaseUserKey" . }}
         {{- end }}
-        {{- if .Values.keyGeneration.enabled }}
+        {{- if and .Values.keyGeneration.enabled (not .Values.appEncryption.existingSecret) }}
         - name: generate-app-key
           image: "{{ .Values.keyGeneration.image.repository }}:{{ .Values.keyGeneration.image.tag }}"
           imagePullPolicy: {{ .Values.keyGeneration.image.pullPolicy }}
@@ -52,16 +86,28 @@ spec:
               SECRET_NAME={{ .Values.keyGeneration.secretName | default (printf "%s-secret" (include "claimctl.fullname" .)) }}
               KEY_NAME={{ .Values.keyGeneration.keyName }}
 
-              if kubectl get secret $SECRET_NAME -n {{ .Release.Namespace }}; then
-                echo "Secret $SECRET_NAME already exists"
-              else
+              get_key() {
+                kubectl get secret "$SECRET_NAME" -n {{ .Release.Namespace }} -o jsonpath="{.data.$KEY_NAME}" 2>/dev/null
+              }
+
+              KEY=$(get_key)
+              if [ -z "$KEY" ]; then
                 echo "Generating new app encryption key..."
-                # Generate 32 bytes random key and base64 encode it
-                KEY=$(head -c 32 /dev/urandom | base64)
-                kubectl create secret generic $SECRET_NAME -n {{ .Release.Namespace }} --from-literal=$KEY_NAME=$KEY
-                echo "Secret $SECRET_NAME created"
+                NEW_KEY=$(head -c 32 /dev/urandom | base64)
+                # `kubectl create` is atomic: if another replica created the secret
+                # concurrently it fails with AlreadyExists, and we fall through to
+                # read the winner's key so all replicas converge on a single key.
+                if ! kubectl create secret generic "$SECRET_NAME" -n {{ .Release.Namespace }} --from-literal="$KEY_NAME=$NEW_KEY" 2>/dev/null; then
+                  echo "Secret created concurrently; reading existing key"
+                fi
+                KEY=$(get_key)
+                if [ -z "$KEY" ]; then
+                  echo "Failed to create or read secret $SECRET_NAME" >&2
+                  exit 1
+                fi
               fi
-      {{- end }}
+              echo "App encryption key is ready"
+        {{- end }}
       containers:
         - name: backend
           image: "{{ .Values.backend.image.repository }}:{{ .Values.backend.image.tag | default .Chart.AppVersion }}"
@@ -72,61 +118,40 @@ spec:
             - name: http
               containerPort: 3000
               protocol: TCP
+          startupProbe:
+            {{- toYaml .Values.backend.startupProbe | nindent 12 }}
           livenessProbe:
             {{- toYaml .Values.backend.livenessProbe | nindent 12 }}
           readinessProbe:
             {{- toYaml .Values.backend.readinessProbe | nindent 12 }}
           env:
             - name: DB_HOST
-              value: {{ if .Values.postgres.enabled }}{{ printf "%s-postgres" .Release.Name | quote }}{{ else }}{{ .Values.db.host | quote }}{{ end }}
+              value: {{ if .Values.postgres.enabled }}{{ include "claimctl.postgresHost" . | quote }}{{ else }}{{ .Values.db.host | quote }}{{ end }}
             - name: DB_PORT
               value: {{ .Values.db.port | quote }}
             - name: DB_USER
-              {{- if .Values.postgres.enabled }}
-              {{- if .Values.postgres.userDatabase.existingSecret }}
               valueFrom:
                 secretKeyRef:
-                  name: {{ .Values.postgres.userDatabase.existingSecret }}
-                  key: {{ .Values.postgres.userDatabase.user.secretKey | default "db-user" }}
-              {{- else }}
-              value: {{ .Values.postgres.userDatabase.user.value | quote }}
-              {{- end }}
-              {{- else if .Values.db.existingSecret }}
-              valueFrom:
-                secretKeyRef:
-                  name: {{ .Values.db.existingSecret }}
-                  key: {{ .Values.db.existingSecretUserKey | default "db-user" }}
-              {{- else }}
-              value: {{ .Values.db.user | quote }}
-              {{- end }}
+                  name: {{ include "claimctl.databaseSecretName" . }}
+                  key: {{ include "claimctl.databaseUserKey" . }}
             - name: DB_PASSWORD
-              {{- if .Values.postgres.enabled }}
-              {{- if .Values.postgres.userDatabase.existingSecret }}
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "claimctl.databaseSecretName" . }}
+                  key: {{ include "claimctl.databasePasswordKey" . }}
+            - name: DB_NAME
+              {{- if and .Values.postgres.enabled .Values.postgres.userDatabase.existingSecret }}
               valueFrom:
                 secretKeyRef:
                   name: {{ .Values.postgres.userDatabase.existingSecret }}
-                  key: {{ .Values.postgres.userDatabase.password.secretKey | default "db-password" }}
-              {{- else }}
-              value: {{ .Values.postgres.userDatabase.password.value | quote }}
-              {{- end }}
+                  key: {{ include "claimctl.databaseNameKey" . }}
+              {{- else if .Values.postgres.enabled }}
+              value: {{ .Values.postgres.userDatabase.name.value | quote }}
               {{- else if .Values.db.existingSecret }}
               valueFrom:
                 secretKeyRef:
                   name: {{ .Values.db.existingSecret }}
-                  key: {{ .Values.db.existingSecretPasswordKey | default "db-password" }}
-              {{- else }}
-              value: {{ .Values.db.password | quote }}
-              {{- end }}
-            - name: DB_NAME
-              {{- if .Values.postgres.enabled }}
-              {{- if .Values.postgres.userDatabase.existingSecret }}
-              valueFrom:
-                secretKeyRef:
-                  name: {{ .Values.postgres.userDatabase.existingSecret }}
-                  key: {{ .Values.postgres.userDatabase.name.secretKey | default "db-name" }}
-              {{- else }}
-              value: {{ .Values.postgres.userDatabase.name.value | quote }}
-              {{- end }}
+                  key: {{ include "claimctl.databaseNameKey" . }}
               {{- else }}
               value: {{ .Values.db.name | quote }}
               {{- end }}
@@ -149,8 +174,17 @@ spec:
                   name: {{ .Values.keyGeneration.secretName | default (printf "%s-secret" (include "claimctl.fullname" .)) }}
                   key: {{ .Values.keyGeneration.keyName }}
             {{- end }}
+          {{- with .Values.backend.extraEnv }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
           resources:
             {{- toYaml .Values.backend.resources | nindent 12 }}
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir: {}
       {{- with .Values.backend.nodeSelector }}
       nodeSelector:
         {{- toYaml . | nindent 8 }}

@@ -1,4 +1,17 @@
 # Default values for claimctl.
+#
+# WARNING: The defaults below target a development / small-installation setup:
+#   - a bundled single-replica PostgreSQL database (postgres.enabled: true)
+#   - an auto-generated APP_ENCRYPTION_KEY stored in a Kubernetes Secret
+#   - mutable image tag fallbacks (chart appVersion)
+#
+# For production:
+#   - use an external managed database (postgres.enabled: false, db.*)
+#   - provide an existing Secret for DB credentials (db.existingSecret)
+#   - provide an existing Secret for the encryption key (appEncryption.existingSecret)
+#   - pin immutable image tags, enable TLS on the Ingress, and enable a NetworkPolicy.
+#
+# See docs/DEPLOYMENT.md for details.
 
 imagePullSecrets: []
 nameOverride: ""
@@ -6,7 +19,7 @@ fullnameOverride: ""
 
 serviceAccount:
   # Specifies whether a service account should be created
-  # Required if appEncryptionKey is not provided (enables key generation)
+  # Required when keyGeneration.enabled is true (grants access to create the secret).
   create: true
   # Annotations to add to the service account
   annotations: {}
@@ -15,18 +28,47 @@ serviceAccount:
   name: ""
 
 keyGeneration:
-  # Enable if appEncryptionKey is not provided to auto-generate one
-  enabled: false
+  # Enable to auto-generate APP_ENCRYPTION_KEY and store it in a Secret.
+  # In production prefer appEncryption.existingSecret and manage the key externally.
+  enabled: true
   image:
     repository: bitnami/kubectl
-    tag: "latest"
+    tag: "1.29.0"
     pullPolicy: IfNotPresent
   secretName: "" # Defaults to fullname-secret if empty
   keyName: "app-encryption-key"
 backend:
   replicaCount: 1
   strategy: {}
+  revisionHistoryLimit: 10
   podAnnotations: {}
+  podLabels: {}
+  priorityClassName: ""
+  # Spread replicas across nodes/zones in production, e.g.:
+  #   - maxSkew: 1
+  #     topologyKey: topology.kubernetes.io/zone
+  #     whenUnsatisfiable: ScheduleAnyway
+  #     labelSelector:
+  #       matchLabels:
+  #         app.kubernetes.io/component: backend
+  topologySpreadConstraints: []
+  podSecurityContext:
+    # NOTE: kept minimal because the wait-for-db and generate-app-key init
+    # containers run from images that expect to start as root.
+    seccompProfile:
+      type: RuntimeDefault
+  containerSecurityContext:
+    readOnlyRootFilesystem: true # Writable paths are mounted from emptyDir (e.g. /tmp)
+    runAsNonRoot: true
+    runAsUser: 1001
+    runAsGroup: 1001
+    allowPrivilegeEscalation: false
+    seccompProfile:
+      type: RuntimeDefault
+    capabilities:
+      drop:
+        - ALL
+  extraEnv: []
   waitForDb:
     enabled: true
     image:
@@ -35,12 +77,19 @@ backend:
       pullPolicy: IfNotPresent
   pdb:
     enabled: false
+    # Prefer maxUnavailable for multi-replica production deployments. A PDB with
+    # minAvailable: 1 blocks node drains while the workload has only one replica.
     minAvailable: 1
+    maxUnavailable: ""
   autoscaling:
     enabled: false
     minReplicas: 1
     maxReplicas: 10
     targetCPUUtilizationPercentage: 80
+    # Optional scale behavior, e.g.:
+    #   scaleDown:
+    #     stabilizationWindowSeconds: 300
+    behavior: {}
   nodeSelector: {}
   tolerations: []
   affinity: {}
@@ -48,7 +97,8 @@ backend:
     repository: ghcr.io/thetaqitahmid/claimctl/backend
     pullPolicy: IfNotPresent
     # Overrides the image tag whose default is the chart appVersion.
-    tag: "latest"
+    # For production use an immutable tag or digest, never "latest".
+    tag: ""
   service:
     type: ClusterIP
     port: 3000
@@ -62,43 +112,62 @@ backend:
     requests:
       cpu: 250m
       memory: 256Mi
+  startupProbe:
+    # Gives migrations and slow database recovery time to complete before
+    # liveness/readiness probes start firing.
+    httpGet:
+      path: /v1/ready
+      port: http
+    initialDelaySeconds: 5
+    periodSeconds: 10
+    timeoutSeconds: 5
+    failureThreshold: 30
   livenessProbe:
+    # Process health only; does NOT depend on the database.
     httpGet:
       path: /v1/health
       port: http
     initialDelaySeconds: 15
     periodSeconds: 10
+    timeoutSeconds: 5
+    failureThreshold: 3
   readinessProbe:
+    # Verifies the database is reachable before routing traffic to the pod.
     httpGet:
-      path: /v1/health
+      path: /v1/ready
       port: http
     initialDelaySeconds: 5
     periodSeconds: 10
-
-  containerSecurityContext:
-    readOnlyRootFilesystem: false # Depends on your app's needs (e.g. if it writes to /tmp)
-    runAsNonRoot: true
-    runAsUser: 1001
+    timeoutSeconds: 5
+    failureThreshold: 3
 
 frontend:
   replicaCount: 1
   strategy: {}
+  revisionHistoryLimit: 10
   podAnnotations: {}
+  podLabels: {}
+  priorityClassName: ""
+  topologySpreadConstraints: []
   pdb:
     enabled: false
     minAvailable: 1
+    maxUnavailable: ""
   autoscaling:
     enabled: false
     minReplicas: 1
     maxReplicas: 10
     targetCPUUtilizationPercentage: 80
+    behavior: {}
   nodeSelector: {}
   tolerations: []
   affinity: {}
   image:
     repository: ghcr.io/thetaqitahmid/claimctl/frontend
     pullPolicy: IfNotPresent
-    tag: "latest"
+    # Overrides the image tag whose default is the chart appVersion.
+    # For production use an immutable tag or digest, never "latest".
+    tag: ""
   service:
     type: ClusterIP
     port: 80
@@ -109,22 +178,50 @@ frontend:
     requests:
       cpu: 100m
       memory: 128Mi
+  startupProbe:
+    httpGet:
+      path: /
+      port: http
+    initialDelaySeconds: 5
+    periodSeconds: 10
+    timeoutSeconds: 5
+    failureThreshold: 6
   livenessProbe:
     httpGet:
       path: /
       port: http
     initialDelaySeconds: 30
     periodSeconds: 20
+    timeoutSeconds: 5
+    failureThreshold: 3
   readinessProbe:
     httpGet:
       path: /
       port: http
     initialDelaySeconds: 10
     periodSeconds: 10
-  securityContext: {}
+    timeoutSeconds: 5
+    failureThreshold: 3
+  securityContext:
+    runAsNonRoot: true
+    runAsUser: 1001
+    runAsGroup: 1001
+    seccompProfile:
+      type: RuntimeDefault
   containerSecurityContext:
     runAsNonRoot: true
     runAsUser: 1001
+    runAsGroup: 1001
+    allowPrivilegeEscalation: false
+    # nginx needs writable paths (/var/cache/nginx, /etc/nginx/conf.d). If the
+    # container image is adapted, switch to readOnlyRootFilesystem: true.
+    readOnlyRootFilesystem: false
+    seccompProfile:
+      type: RuntimeDefault
+    capabilities:
+      drop:
+        - ALL
+  extraEnv: []
 
 ingress:
   enabled: false
@@ -147,31 +244,59 @@ ingress:
   #      - chart-example.local
 
 db:
+  # External database settings. Used when postgres.enabled is false.
+  # In production always provide db.existingSecret instead of plaintext values.
   host: db
   port: 5432
-  user: "" # devuser
-  name: "" # devdb
-  password: "" # devpass. In production, use secrets!
-  # If existingSecret is set, the password and user will be retrieved from the secret.
+  user: "" # e.g. devuser
+  name: "" # e.g. devdb
+  password: "" # e.g. devpass
   # existingSecret: "my-db-secret"
   # existingSecretUserKey: "db-user"
   # existingSecretPasswordKey: "db-password"
+  # existingSecretNameKey: "db-name"
 
 appEncryption:
-  # Provide the name of an existing Kubernetes secret if you prefer to manage secrets outside Helm
+  # Provide the name of an existing Kubernetes secret if you prefer to manage
+  # secrets outside Helm. The key must be stable across replicas and restarts.
   existingSecret: ""
   secretKey: "app-encryption-key"
 
-postgres:
+networkPolicy:
+  # Enables strict ingress/egress NetworkPolicies for frontend, backend, and the
+  # bundled database. When enabled, the ingress controller selector below MUST
+  # be configured so traffic can reach the workloads.
   enabled: false
+  # Selector matching the ingress controller pods that are allowed to reach the
+  # frontend (and backend for /api when exposed via the Ingress), e.g.:
+  #   namespaceSelector:
+  #     kubernetes.io/metadata.name: ingress-nginx
+  #   podSelector:
+  #     app.kubernetes.io/name: ingress-nginx
+  ingressController:
+    namespaceSelector: {}
+    podSelector: {}
+  # When an external database is used (postgres.enabled: false), restrict
+  # backend egress to these CIDRs on the database port. If empty, all
+  # destinations on the database port are allowed (default).
+  externalDbCIDRs: []
+
+postgres:
+  # The bundled single-replica PostgreSQL is intended for development and small
+  # installations. For production use an external managed database instead.
+  enabled: true
+  # Optional name overrides for the bundled PostgreSQL dependency. If set, the
+  # backend resolves the database hostname using the same logic as the subchart.
+  nameOverride: ""
+  fullnameOverride: ""
   affinity: {}
   podLabels: {}
   nodeSelector: {}
   settings:
     superuserPassword:
-      value: "" # Required for initialization. In production, use existingSecret!
-  #   existingSecret: "my-postgres-secret"
-  #   secretKey: "admin-password"
+      value: "superpass" # Dev only. In production use existingSecret!
+    #   existingSecret: "my-postgres-secret"
+    #   secretKey: "admin-password"
   userDatabase:
     # existingSecret: "my-app-db-secret"
     # name:
@@ -182,11 +307,11 @@ postgres:
     #   secretKey: "db-password"
     # Fallback to plaintext for dev if no secret provided
     name:
-      value: "" # devdb
+      value: "devdb"
     user:
-      value: "" # devuser
+      value: "devuser"
     password:
-      value: "" # devpass
+      value: "devpass"
   storage:
     requestedSize: 1Gi
     accessModes:

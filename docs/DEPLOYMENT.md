@@ -106,53 +106,97 @@ psql "postgresql://..." -f backend/database/seed.sql
 The `charts/claimctl` directory contains a Helm chart for deploying the
 application to Kubernetes.
 
+> The chart defaults target development/small-installation setups: they bundle a
+> single-replica PostgreSQL (`postgres.enabled: true`) and auto-generate the
+> encryption key. The chart fails closed when required values are missing, so a
+> misconfigured release is rejected before anything is applied.
+
+### Production Checklist
+
+- Use an external managed database: `postgres.enabled: false` with `db.*` set.
+- Provide existing Kubernetes Secrets for DB credentials
+  (`db.existingSecret`) and the encryption key
+  (`appEncryption.existingSecret`).
+- Pin immutable image tags (`backend.image.tag`, `frontend.image.tag`) instead
+  of relying on the chart `appVersion`.
+- Enable TLS on the Ingress (`ingress.tls`) and terminate HTTPS at the
+  ingress controller.
+- Scale out: `replicaCount: 3` or enable autoscaling, add a `PodDisruptionBudget`
+  (prefer `maxUnavailable`), and configure `topologySpreadConstraints` /
+  pod anti-affinity.
+- Enable `networkPolicy.enabled` and configure the
+  `networkPolicy.ingressController` selector for your ingress controller.
+- Set realistic `resources`, `startupProbe`, `readinessProbe`, and
+  `livenessProbe` values for your workload.
+
 ### Database Credentials
 
-By default, the chart uses the values in `values.yaml` for database credentials.
-For production, it is recommended to use an existing Kubernetes Secret.
+**External database (recommended for production):**
 
-**Using an Existing Secret:**
-
-1. Create a secret containing your database user and password:
+1. Create a secret containing your database user, password, and name:
    ```bash
-   kubectl create secret generic my-db-secret --from-literal=db-user=postgres
-       --from-literal=db-password=securepassword
+   kubectl create secret generic my-db-secret \
+       --from-literal=db-user=postgres \
+       --from-literal=db-password=securepassword \
+       --from-literal=db-name=claimctl
    ```
 2. Configure `values.yaml` to use this secret:
    ```yaml
+   postgres:
+     enabled: false
    db:
+     host: "your-db-host"
+     port: 5432
+     name: "claimctl"
      existingSecret: "my-db-secret"
      existingSecretUserKey: "db-user" # Optional, defaults to "db-user"
      existingSecretPasswordKey: "db-password" # Optional, defaults to "db-password"
    ```
 
+**Without an existing secret** the chart creates a
+`<release>-db-credentials` Secret from the provided `db.user`, `db.password`,
+and `db.name` values and references it via `secretKeyRef`, so credentials are
+never injected into the Deployment as plaintext environment variables.
+
+**Bundled database (development only):** when `postgres.enabled: true`, the
+single-replica PostgreSQL dependency is used. This is not a production database
+(no replication, backups, or failover). Credentials are configured under
+`postgres.userDatabase` and `postgres.settings.superuserPassword`, and should
+come from an existing Secret (`postgres.userDatabase.existingSecret`,
+`postgres.settings.existingSecret`) in production-like environments.
+
 ### App Encryption Key
 
-The `APP_ENCRYPTION_KEY` is crucial for decrypting sensitive data (like
-sessions). If not provided, the backend generates a random key on startup.
+The `APP_ENCRYPTION_KEY` is used to encrypt sensitive data (sessions, webhook
+secrets, API tokens). A random key generated on first startup is **not
+persistent**: data becomes undecryptable and replicas diverge. The chart
+therefore requires one of the following:
 
-**Important:** For multiple replicas, **you must ensure all replicas use the
-same key**.
+**Option 1: Existing Secret (recommended for production)**
 
-**Option 1: Manual Configuration**
+Create a secret containing a 32-byte base64-encoded key:
 
-Set the key directly in `values.yaml` (or via `--set`):
-
-```yaml
-appEncryptionKey: "your-32-byte-base64-key"
+```bash
+kubectl create secret generic claimctl-encryption \
+    --from-literal=app-encryption-key="$(head -c 32 /dev/urandom | base64)"
 ```
 
-**Option 2: Auto-Generation (Recommended)**
+```yaml
+appEncryption:
+  existingSecret: "claimctl-encryption"
+  secretKey: "app-encryption-key"
+```
 
-Enable the init container to automatically generate a random key and store it in
-a Kubernetes Secret. This ensures consistency across replicas without handling
-the key manually.
+**Option 2: Auto-Generation (development convenience)**
+
+An init container generates the key once and stores it in a Kubernetes Secret,
+keeping it stable across replicas and restarts:
 
 ```yaml
 keyGeneration:
   enabled: true
-  # image: bitnami/kubectl:latest # Optional: configure kubectl image
 ```
 
-_Note: This creates a ServiceAccount, Role, and RoleBinding to allow the Pod to
-manage Secrets in its namespace._
+_Note: This creates a ServiceAccount, Role, and RoleBinding scoped to the
+single generated Secret name so the Pod can create/manage it in its namespace.
+Prefer Option 1 when secrets are managed outside Helm._

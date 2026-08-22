@@ -94,7 +94,25 @@ func SetupRoutes(ctx context.Context, app *fiber.App, dbConn *connection.DBConn,
 	api := app.Group("/api", DBMiddleware(dbConn))
 
 	// Health Check Endpoint (No Auth Required)
+	// Used for liveness: reports process health only.
 	app.Get("/v1/health", func(c *fiber.Ctx) error {
+		return c.JSON(fiber.Map{
+			"status": "ok",
+		})
+	})
+
+	// Readiness Endpoint (No Auth Required)
+	// Used for readiness: verifies that required dependencies (database) are
+	// reachable so traffic is only routed to fully initialized instances.
+	app.Get("/v1/ready", func(c *fiber.Ctx) error {
+		pingCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if err := dbConn.Ping(pingCtx); err != nil {
+			slog.Warn("readiness check failed", "error", err)
+			return c.Status(fiber.StatusServiceUnavailable).JSON(fiber.Map{
+				"status": "unavailable",
+			})
+		}
 		return c.JSON(fiber.Map{
 			"status": "ok",
 		})

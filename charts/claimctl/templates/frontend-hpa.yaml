@@ -13,6 +13,10 @@ spec:
     name: {{ include "claimctl.fullname" . }}-frontend
   minReplicas: {{ .Values.frontend.autoscaling.minReplicas }}
   maxReplicas: {{ .Values.frontend.autoscaling.maxReplicas }}
+  {{- with .Values.frontend.autoscaling.behavior }}
+  behavior:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
   metrics:
     - type: Resource
       resource:

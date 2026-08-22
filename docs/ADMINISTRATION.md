@@ -13,7 +13,7 @@ To access the Admin Panel, you must be logged in with an account that has the
 Admins have full control over user accounts.
 
 - **List Users**: View all registered users.
-- **Create User**: Manually add a new user (useful if not using LDAP).
+- **Create User**: Manually add a new local user.
 - **Edit User**: Update roles, email, or details.
 - **Delete User**: Remove user access.
 

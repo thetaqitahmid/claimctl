@@ -150,7 +150,7 @@ func SetupRoutes(ctx context.Context, app *fiber.App, dbConn *connection.DBConn,
 
 	api.Post("/login", authLimiter, userHandler.Login)
 	api.Post("/logout", userHandler.Logout)
-	api.Post("/auth/ldap", authLimiter, userHandler.LoginLDAP)
+	api.Get("/auth/methods", userHandler.GetAuthMethods)
 	api.Get("/auth/oidc/login", authLimiter, userHandler.LoginOIDC)
 	api.Get("/auth/oidc/callback", userHandler.CallbackOIDC)
 	api.Post("/auth/refresh", refreshLimiter, userHandler.RefreshToken)

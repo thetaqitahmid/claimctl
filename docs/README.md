@@ -10,7 +10,7 @@ covers everything from setting up the system to using its core features.
     environment.
 
 - **[Authentication](AUTHENTICATION.md)**
-  - Local login, LDAP integration, and user sessions.
+  - Local login, OIDC SSO, and user sessions.
 
 - **[Resource Management](RESOURCES.md)**
   - Creating, browsing, and managing resources and their history.
@@ -36,7 +36,7 @@ covers everything from setting up the system to using its core features.
 
 1. **Deploy**: Follow the [Deployment Guide](DEPLOYMENT.md) to get the stack
    running.
-2. **Login**: The first user created via seed or LDAP is typically an Admin.
+2. **Login**: The first user created via seed is typically an Admin.
 3. **Setup**: Create [Spaces](ADMINISTRATION.md#space-management) and then add
    [Resources](RESOURCES.md) to them.
 4. **Invite**: Users can now log in and start making

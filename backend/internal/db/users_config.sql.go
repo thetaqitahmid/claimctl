@@ -16,7 +16,7 @@ const updateUserChannelConfig = `-- name: UpdateUserChannelConfig :one
 UPDATE claimctl.users
 SET slack_destination = $2, teams_webhook_url = $3, notification_email = $4
 WHERE id = $1
-RETURNING id, email, name, password, created_at, updated_at, role, status, last_login, failed_login_attempts, locked_until, slack_destination, teams_webhook_url, notification_email, auth_provider
+RETURNING id, email, name, password, created_at, updated_at, role, status, last_login, failed_login_attempts, locked_until, slack_destination, teams_webhook_url, notification_email, auth_provider, oidc_subject
 `
 
 type UpdateUserChannelConfigParams struct {
@@ -50,6 +50,7 @@ func (q *Queries) UpdateUserChannelConfig(ctx context.Context, arg UpdateUserCha
 		&i.TeamsWebhookUrl,
 		&i.NotificationEmail,
 		&i.AuthProvider,
+		&i.OidcSubject,
 	)
 	return i, err
 }

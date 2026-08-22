@@ -7,8 +7,12 @@ SELECT * FROM claimctl.users WHERE id=$1;
 -- name: FindUserByEmail :one
 SELECT * FROM claimctl.users WHERE email=$1;
 
+-- name: FindUserByOIDCSubject :one
+SELECT * FROM claimctl.users WHERE oidc_subject=$1;
+
 -- name: CreateUser :exec
-INSERT INTO claimctl.users (email, name, password, role, status, last_login, auth_provider) VALUES ($1, $2, $3, $4, $5, $6, $7);
+INSERT INTO claimctl.users (email, name, password, role, status, last_login, auth_provider, oidc_subject)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8);
 
 -- name: GetPasswordById :one
 SELECT password FROM claimctl.users WHERE id=$1;
@@ -19,6 +23,11 @@ DELETE FROM claimctl.users WHERE id=$1;
 -- name: UpdateUserById :exec
 UPDATE claimctl.users SET email=$1, name=$2, password=$3, role=$4, status=$5, last_login=$6, updated_at=CURRENT_TIMESTAMP
 WHERE id=$7;
+
+-- name: UpdateOIDCUser :exec
+UPDATE claimctl.users
+SET email=$1, name=$2, role=$3, oidc_subject=$4, last_login=CURRENT_TIMESTAMP, updated_at=CURRENT_TIMESTAMP
+WHERE id=$5;
 
 -- name: VerifyUserEmailIsUnique :one
 SELECT COUNT(*) FROM claimctl.users where email=$1;

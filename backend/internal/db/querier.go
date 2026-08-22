@@ -61,6 +61,7 @@ type Querier interface {
 	FindUserActiveReservations(ctx context.Context, userID uuid.UUID) ([]FindUserActiveReservationsRow, error)
 	FindUserByEmail(ctx context.Context, email string) (ClaimctlUser, error)
 	FindUserById(ctx context.Context, id uuid.UUID) (ClaimctlUser, error)
+	FindUserByOIDCSubject(ctx context.Context, oidcSubject pgtype.Text) (ClaimctlUser, error)
 	FindUserReservationForResource(ctx context.Context, arg FindUserReservationForResourceParams) (ClaimctlReservation, error)
 	GetAPITokenByHash(ctx context.Context, tokenHash string) (ClaimctlApiToken, error)
 	GetAllEnabledHealthConfigs(ctx context.Context) ([]ClaimctlResourceHealthConfig, error)
@@ -122,6 +123,7 @@ type Querier interface {
 	SetResourceMaintenanceMode(ctx context.Context, arg SetResourceMaintenanceModeParams) (ClaimctlResource, error)
 	UpdateAPITokenLastUsed(ctx context.Context, id uuid.UUID) error
 	UpdateGroup(ctx context.Context, arg UpdateGroupParams) (ClaimctlGroup, error)
+	UpdateOIDCUser(ctx context.Context, arg UpdateOIDCUserParams) error
 	UpdateQueuePositions(ctx context.Context, arg UpdateQueuePositionsParams) error
 	UpdateReservationStatus(ctx context.Context, arg UpdateReservationStatusParams) error
 	UpdateResourceById(ctx context.Context, arg UpdateResourceByIdParams) error

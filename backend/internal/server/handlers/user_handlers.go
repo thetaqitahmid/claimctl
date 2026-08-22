@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/coreos/go-oidc/v3/oidc"
 	"github.com/google/uuid"
 
 	"github.com/gofiber/fiber/v2"
@@ -436,46 +437,17 @@ func (h *UserHandler) isAdmin(c *fiber.Ctx) bool {
 	return user.Role == "admin"
 }
 
-// LoginLDAP handles user login via LDAP
-func (h *UserHandler) LoginLDAP(c *fiber.Ctx) error {
-	var loginRequest services.LoginRequest
-	if err := c.BodyParser(&loginRequest); err != nil {
-		return utils.SendError(c, fiber.StatusBadRequest, "Invalid request body", err)
-	}
-
-	user, err := h.userService.LoginLDAP(c.Context(), loginRequest.Email, loginRequest.Password)
-	if err != nil {
-		return utils.SendError(c, fiber.StatusUnauthorized, "Invalid credentials", err)
-	}
-
-	token, err := h.generateJWT(user.ID, user.Email, user.Name, user.Role, user.Status)
-	if err != nil {
-		return utils.SendError(c, fiber.StatusInternalServerError, "Failed to generate token", err)
-	}
-
-	refreshToken, err := h.refreshTokenService.Issue(c.Context(), user.ID)
-	if err != nil {
-		return utils.SendError(c, fiber.StatusInternalServerError, "Failed to issue refresh token", err)
-	}
-
-	h.setAuthCookies(c, token, refreshToken)
-
+// GetAuthMethods returns which authentication methods are available.
+func (h *UserHandler) GetAuthMethods(c *fiber.Ctx) error {
 	return c.JSON(fiber.Map{
-		"user": fiber.Map{
-			"id":            user.ID,
-			"email":         user.Email,
-			"name":          user.Name,
-			"role":          user.Role,
-			"status":        user.Status,
-			"auth_provider": user.AuthProvider,
-		},
-		"message": "Login successful",
+		"local": true,
+		"oidc":  h.isOIDCConfigured(c),
 	})
 }
 
 // LoginOIDC handles redirection to OIDC provider
 func (h *UserHandler) LoginOIDC(c *fiber.Ctx) error {
-	_, oauth2Config, err := h.getOIDCConfig(c)
+	_, oauth2Config, _, err := h.getOIDCConfig(c)
 	if err != nil {
 		return utils.SendError(c, fiber.StatusServiceUnavailable, "OIDC is not configured", nil)
 	}
@@ -517,7 +489,7 @@ func (h *UserHandler) LoginOIDC(c *fiber.Ctx) error {
 
 // CallbackOIDC handles the OIDC callback
 func (h *UserHandler) CallbackOIDC(c *fiber.Ctx) error {
-	oidcProvider, oauth2Config, err := h.getOIDCConfig(c)
+	oidcProvider, oauth2Config, clientID, err := h.getOIDCConfig(c)
 	if err != nil {
 		return utils.SendError(c, fiber.StatusServiceUnavailable, "OIDC is not configured", nil)
 	}
@@ -527,11 +499,14 @@ func (h *UserHandler) CallbackOIDC(c *fiber.Ctx) error {
 	cookieState := c.Cookies("oidc_state")
 	verifier := c.Cookies("oidc_verifier")
 
-	if state != cookieState {
+	if state == "" || state != cookieState {
 		return utils.SendError(c, fiber.StatusBadRequest, "Invalid state parameter", nil)
 	}
 	if verifier == "" {
 		return utils.SendError(c, fiber.StatusBadRequest, "Missing PKCE verifier", nil)
+	}
+	if code == "" {
+		return utils.SendError(c, fiber.StatusBadRequest, "Missing authorization code", nil)
 	}
 
 	oauth2Token, err := oauth2Config.Exchange(c.Context(), code, oauth2.VerifierOption(verifier))
@@ -539,27 +514,73 @@ func (h *UserHandler) CallbackOIDC(c *fiber.Ctx) error {
 		return utils.SendError(c, fiber.StatusInternalServerError, "Failed to exchange token", err)
 	}
 
-	tokenSource := oauth2Config.TokenSource(c.Context(), oauth2Token)
-	userInfo, err := oidcProvider.UserInfo(c.Context(), tokenSource)
-	if err != nil {
-		return utils.SendError(c, fiber.StatusInternalServerError, "Failed to get user info", err)
+	rawIDToken, ok := oauth2Token.Extra("id_token").(string)
+	if !ok || rawIDToken == "" {
+		return utils.SendError(c, fiber.StatusInternalServerError, "Missing ID token from provider", nil)
 	}
 
-	// Sync user
+	idToken, err := oidcProvider.Verifier(&oidc.Config{ClientID: clientID}).Verify(c.Context(), rawIDToken)
+	if err != nil {
+		return utils.SendError(c, fiber.StatusUnauthorized, "Invalid ID token", err)
+	}
+
 	var claims struct {
-		Email string `json:"email"`
-		Name  string `json:"name"`
+		Email         string `json:"email"`
+		EmailVerified *bool  `json:"email_verified"`
+		Name          string `json:"name"`
 	}
-	if err := userInfo.Claims(&claims); err != nil {
-		return utils.SendError(c, fiber.StatusInternalServerError, "Failed to parse claims", err)
+	if err := idToken.Claims(&claims); err != nil {
+		return utils.SendError(c, fiber.StatusInternalServerError, "Failed to parse ID token claims", err)
 	}
 
-	user, err := h.userService.LoginOIDC(c.Context(), claims.Email, claims.Name)
+	groupsClaim := h.settingsService.GetString(c.Context(), "oidc_groups_claim")
+	if groupsClaim == "" {
+		groupsClaim = "groups"
+	}
+	var groups []string
+	var raw map[string]interface{}
+	if err := idToken.Claims(&raw); err == nil {
+		if g, ok := raw[groupsClaim]; ok {
+			groups = flattenGroupsClaim(g)
+		}
+	}
+
+	if claims.Email == "" {
+		return utils.SendError(c, fiber.StatusBadRequest, "Email claim is required", nil)
+	}
+	if claims.EmailVerified != nil && !*claims.EmailVerified {
+		return utils.SendError(c, fiber.StatusUnauthorized, "Email is not verified", nil)
+	}
+
+	isAdmin := false
+	adminGroup := h.settingsService.GetString(c.Context(), "oidc_admin_group")
+	if adminGroup != "" {
+		for _, g := range groups {
+			if strings.EqualFold(g, adminGroup) {
+				isAdmin = true
+				break
+			}
+		}
+	}
+
+	user, err := h.userService.LoginOIDC(c.Context(), services.OIDCLoginRequest{
+		Subject: idToken.Subject,
+		Email:   claims.Email,
+		Name:    claims.Name,
+		IsAdmin: isAdmin,
+	})
 	if err != nil {
+		if strings.Contains(err.Error(), "different login method") ||
+			strings.Contains(err.Error(), "subject mismatch") ||
+			strings.Contains(err.Error(), "email already in use") {
+			return utils.SendError(c, fiber.StatusConflict, err.Error(), err)
+		}
+		if strings.Contains(err.Error(), "inactive") {
+			return utils.SendError(c, fiber.StatusUnauthorized, "User account is inactive", err)
+		}
 		return utils.SendError(c, fiber.StatusInternalServerError, "Failed to login/sync OIDC user", err)
 	}
 
-	// Generate JWT
 	token, err := h.generateJWT(user.ID, user.Email, user.Name, user.Role, user.Status)
 	if err != nil {
 		return utils.SendError(c, fiber.StatusInternalServerError, "Failed to generate token", err)
@@ -572,11 +593,9 @@ func (h *UserHandler) CallbackOIDC(c *fiber.Ctx) error {
 
 	h.setAuthCookies(c, token, refreshToken)
 
-	// Clear OIDC cookies
 	c.ClearCookie("oidc_state")
 	c.ClearCookie("oidc_verifier")
 
-	// Redirect to frontend
 	frontendURL := utils.GetEnv("FRONTEND_URL", "/")
 	return c.Redirect(frontendURL, fiber.StatusFound)
 }

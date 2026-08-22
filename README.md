@@ -52,7 +52,7 @@ tracked and managed collaboratively.
   and user behavior for accountability.
 - **System Backup & Restore**: Built-in database backup and restore
   capabilities for administrators.
-- **Multiple Authentication Methods**: Support for local auth, LDAP, and OpenID
+- **Multiple Authentication Methods**: Support for local auth and OpenID
   Connect (OIDC) for enterprise SSO.
 - **Command-Line Interface**: Full-featured CLI (`claimctl`) for
   automation, scripting, and headless operations.
@@ -179,7 +179,7 @@ See [CLI Reference](docs/CLI.md) for complete CLI documentation.
 
 Comprehensive documentation is available in the `docs/` directory:
 
-- [Authentication Guide](docs/AUTHENTICATION.md) - Local, LDAP, and OIDC setup
+- [Authentication Guide](docs/AUTHENTICATION.md) - Local and OIDC setup
 - [Reservations & Queue System](docs/RESERVATIONS.md) - How reservations work
 - [Webhooks & Automation](docs/WEBHOOKS.md) - Integrate with external systems
 - [Resource Management](docs/RESOURCES.md) - Managing resources and labels
@@ -218,7 +218,7 @@ instructions.
 
 - **Backend**: Go with PostgreSQL database
 - **Frontend**: React with TypeScript
-- **Authentication**: JWT, LDAP, OpenID Connect
+- **Authentication**: JWT, OpenID Connect
 - **Real-time**: Server-Sent Events (SSE)
 - **Deployment**: Docker, Kubernetes, Helm
 

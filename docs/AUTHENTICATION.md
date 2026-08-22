@@ -1,15 +1,11 @@
 # Authentication Guide
 
-claimctl supports three modes of authentication:
+claimctl supports two modes of authentication:
 
 1. **Local Authentication** (Database-backed users)
-2. **LDAP Authentication** (Enterprise directory integration)
-3. **OpenID Connect (OIDC)** (Single Sign-On)
+2. **OpenID Connect (OIDC)** (Single Sign-On)
 
 ## Authentication & Authorization
-
-claimctl supports three methods of authentication: Standard, LDAP, and
-OpenID Connect (OIDC).
 
 ### 1. Standard Email/Password
 
@@ -19,42 +15,59 @@ hashing.
 - **Registration**: Users can be created by Admins via the User Management
   panel.
 - **Login**: `/api/login` verifies email/password against the `users` table.
-- **Session**: Returns a JWT token set as an HTTP-only cookie.
+  Only users with `auth_provider=local` may use password login.
+- **Session**: Returns a JWT access token and rotating refresh token as
+  HTTP-only cookies.
+- **Lockout**: After 3 failed attempts the account is locked for 30 minutes.
 
-### 2. LDAP (Lightweight Directory Access Protocol)
+### 2. OpenID Connect (OIDC)
 
-Integration with enterprise directory services (e.g., Active Directory,
-OpenLDAP).
+Single Sign-On (SSO) using modern providers (e.g. Google, GitLab, Keycloak,
+Entra ID).
 
-- **Configuration**: Set `LDAP_URL`, `LDAP_BIND_DN`, `LDAP_BIND_PASSWORD`,
-  `LDAP_BASE_DN` in environment variables.
-- **Flow**:
-  1. User enters LDAP credentials in the login form.
-  2. Backend binds to the LDAP server with service credentials.
-  3. Backend searches for the user by `mail` or `uid`.
-  4. Backend attempts to bind as the user to verify password.
-  5. On success, user profile is synced to local `users` table and a session is
-     created.
-- **Role Mapping**: Admins can be mapped via `LDAP_ADMIN_GROUP_DN`.
+- **Configuration** (environment variables sync into `app_settings` on
+  startup when DB values are empty; also editable in Admin → Auth settings):
+  - `OIDC_ISSUER`: Issuer URL of the provider.
+  - `OIDC_CLIENT_ID`: Public client identifier.
+  - `OIDC_CLIENT_SECRET`: Client secret (stored encrypted when marked secret).
+  - `OIDC_REDIRECT_URL`: (Optional) Callback URL. If empty, derived as
+    `{request base}/api/auth/oidc/callback`.
+  - `OIDC_SCOPES`: (Optional) Space-separated scopes; default
+    `openid profile email`.
+  - `OIDC_ADMIN_GROUP`: (Optional) Group name that grants the `admin` role
+    (promote-only; existing admins are not demoted when the claim is absent).
+  - `OIDC_GROUPS_CLAIM`: (Optional) Claim name for groups; default `groups`.
+  - `FRONTEND_URL`: Redirect target after successful login.
 
-### 3. OpenID Connect (OIDC)
+- **Discovery**: `GET /api/auth/methods` returns
+  `{ "local": true, "oidc": true|false }` so the login UI can hide SSO when
+  OIDC is not configured.
 
-Single Sign-On (SSO) using modern providers (e.g., Google, GitLab, Keycloak).
-
-- **Configuration**:
-  - `OIDC_ISSUER`: The URL of the specific provider.
-  - `OIDC_CLIENT_ID`: Public identifier for the app.
-  - `OIDC_CLIENT_SECRET`: Secret known only to the app and provider.
-  - `OIDC_REDIRECT_URL`: (Optional) The callback URL. If not provided, it is
-    automatically derived as `{BASE_URL}/api/auth/oidc/callback`.
-  - `FRONTEND_URL`: URL to redirect the user after successful login (useful for
-    dev vs prod).
 - **Flow (with PKCE)**:
   1. User clicks "Sign in with SSO".
   2. Backend generates a `code_verifier` and `code_challenge`. Stores verifier
-     in HTTP-only cookie.
-  3. Redirects to Provider with `code_challenge`.
-  4. Provider redirects back to `/api/auth/oidc/callback` with an auth code.
-  5. Backend sends auth code + `code_verifier` to Provider.
-  6. Provider validates `SHA256(verifier) == challenge` and returns tokens.
-  7. Backend syncs user and redirects to `FRONTEND_URL`.
+     and CSRF `state` in HTTP-only cookies (`SameSite=Lax`).
+  3. Redirects to the provider with `code_challenge`.
+  4. Provider redirects to `/api/auth/oidc/callback` with an auth code.
+  5. Backend exchanges the code + verifier, then **verifies the ID token**
+     (signature, audience, issuer).
+  6. Requires an `email` claim. If `email_verified` is present it must be
+     `true`.
+  7. Links the user by stable OIDC `sub` (`oidc_subject`). First login may
+     bind an existing `auth_provider=oidc` row by email; a local account with
+     the same email is **not** taken over.
+  8. Issues session cookies and redirects to `FRONTEND_URL`.
+
+- **Password changes**: Not available for OIDC users (managed at the IdP).
+
+- **Admin role mapping**: Matching `OIDC_ADMIN_GROUP` **promotes** a user to
+  `admin` only. Removing the group membership at the IdP does **not** demote
+  them; a local admin must change the role in User Management.
+
+### Migrating former LDAP users
+
+LDAP authentication has been removed. On upgrade, migration `000020` sets
+`auth_provider='local'` for any remaining LDAP users. Their old dummy passwords
+are not usable. An admin must reset each user's password (or delete and
+re-create the account, or have them use OIDC with a different email if linking
+is required).

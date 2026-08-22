@@ -1,6 +1,7 @@
 package services
 
 import (
+	"database/sql"
 	"testing"
 	"time"
 
@@ -178,6 +179,19 @@ func TestUserService_Login(t *testing.T) {
 				mockDB.On("UpdateUserLastLogin", ctx, testutils.TestUUID(1)).Return(nil)
 			},
 			shouldSucceed: true,
+		},
+		{
+			name: "OIDC user cannot password login",
+			loginReq: LoginRequest{
+				Email:    "oidc@example.com",
+				Password: "password123",
+			},
+			mockSetup: func() {
+				user := testutils.CreateTestUser(testutils.TestUUID(1), "oidc@example.com", "OIDC User", false)
+				user.AuthProvider = "oidc"
+				mockDB.On("FindUserByEmail", ctx, "oidc@example.com").Return(user, nil)
+			},
+			expectedError: "Invalid password",
 		},
 	}
 
@@ -761,18 +775,6 @@ func TestUserService_UpdatePassword(t *testing.T) {
 			shouldSucceed: true,
 		},
 		{
-			name:            "LDAP user - password change blocked",
-			userID:          testutils.TestUUID(2),
-			currentPassword: "OldPass1!",
-			newPassword:     "NewPass1!",
-			mockSetup: func() {
-				user := testutils.CreateTestUser(testutils.TestUUID(2), "ldap@example.com", "LDAP User", false)
-				user.AuthProvider = "ldap"
-				mockDB.On("FindUserById", ctx, testutils.TestUUID(2)).Return(user, nil)
-			},
-			expectedError: "password change is not available for ldap users",
-		},
-		{
 			name:            "OIDC user - password change blocked",
 			userID:          testutils.TestUUID(3),
 			currentPassword: "OldPass1!",
@@ -839,4 +841,135 @@ func TestUserService_UpdatePassword(t *testing.T) {
 			mockDB.AssertExpectations(t)
 		})
 	}
+}
+
+func TestUserService_LoginOIDC(t *testing.T) {
+	ctx := testutils.TestContext()
+	mockDB := &testutils.MockQuerier{}
+	service := NewUserService(mockDB)
+
+	subText := pgtype.Text{String: "sub-123", Valid: true}
+
+	t.Run("creates new user by subject", func(t *testing.T) {
+		mockDB.ExpectedCalls = nil
+		mockDB.On("FindUserByOIDCSubject", ctx, subText).Return(db.ClaimctlUser{}, sql.ErrNoRows).Once()
+		mockDB.On("FindUserByEmail", ctx, "new@example.com").Return(db.ClaimctlUser{}, sql.ErrNoRows).Once()
+		mockDB.On("CreateUser", ctx, mock.MatchedBy(func(p db.CreateUserParams) bool {
+			return p.Email == "new@example.com" && p.AuthProvider == "oidc" &&
+				p.OidcSubject.String == "sub-123" && p.Role == "user"
+		})).Return(nil).Once()
+
+		created := testutils.CreateTestUser(testutils.TestUUID(10), "new@example.com", "New User", false)
+		created.AuthProvider = "oidc"
+		created.OidcSubject = subText
+		mockDB.On("FindUserByOIDCSubject", ctx, subText).Return(created, nil).Once()
+
+		user, err := service.LoginOIDC(ctx, OIDCLoginRequest{
+			Subject: "sub-123",
+			Email:   "new@example.com",
+			Name:    "New User",
+		})
+		require.NoError(t, err)
+		assert.Equal(t, "new@example.com", user.Email)
+		mockDB.AssertExpectations(t)
+	})
+
+	t.Run("promotes to admin when IsAdmin", func(t *testing.T) {
+		mockDB.ExpectedCalls = nil
+		existing := testutils.CreateTestUser(testutils.TestUUID(11), "adminish@example.com", "User", false)
+		existing.AuthProvider = "oidc"
+		existing.OidcSubject = subText
+		mockDB.On("FindUserByOIDCSubject", ctx, subText).Return(existing, nil).Once()
+		mockDB.On("UpdateOIDCUser", ctx, mock.MatchedBy(func(p db.UpdateOIDCUserParams) bool {
+			return p.ID == testutils.TestUUID(11) && p.Role == "admin" && p.OidcSubject.String == "sub-123"
+		})).Return(nil).Once()
+
+		user, err := service.LoginOIDC(ctx, OIDCLoginRequest{
+			Subject: "sub-123",
+			Email:   "adminish@example.com",
+			Name:    "User",
+			IsAdmin: true,
+		})
+		require.NoError(t, err)
+		assert.Equal(t, "admin", user.Role)
+		mockDB.AssertExpectations(t)
+	})
+
+	t.Run("binds subject for legacy oidc user by email", func(t *testing.T) {
+		mockDB.ExpectedCalls = nil
+		legacySub := pgtype.Text{String: "legacy-sub", Valid: true}
+		mockDB.On("FindUserByOIDCSubject", ctx, legacySub).Return(db.ClaimctlUser{}, sql.ErrNoRows).Once()
+
+		legacy := testutils.CreateTestUser(testutils.TestUUID(12), "legacy@example.com", "Legacy", false)
+		legacy.AuthProvider = "oidc"
+		mockDB.On("FindUserByEmail", ctx, "legacy@example.com").Return(legacy, nil).Once()
+		mockDB.On("UpdateOIDCUser", ctx, mock.MatchedBy(func(p db.UpdateOIDCUserParams) bool {
+			return p.ID == testutils.TestUUID(12) && p.OidcSubject.String == "legacy-sub"
+		})).Return(nil).Once()
+
+		user, err := service.LoginOIDC(ctx, OIDCLoginRequest{
+			Subject: "legacy-sub",
+			Email:   "legacy@example.com",
+			Name:    "Legacy",
+		})
+		require.NoError(t, err)
+		assert.Equal(t, "legacy@example.com", user.Email)
+		mockDB.AssertExpectations(t)
+	})
+
+	t.Run("rejects local account email collision", func(t *testing.T) {
+		mockDB.ExpectedCalls = nil
+		collSub := pgtype.Text{String: "coll-sub", Valid: true}
+		mockDB.On("FindUserByOIDCSubject", ctx, collSub).Return(db.ClaimctlUser{}, sql.ErrNoRows).Once()
+		local := testutils.CreateTestUser(testutils.TestUUID(13), "local@example.com", "Local", false)
+		local.AuthProvider = "local"
+		mockDB.On("FindUserByEmail", ctx, "local@example.com").Return(local, nil).Once()
+
+		_, err := service.LoginOIDC(ctx, OIDCLoginRequest{
+			Subject: "coll-sub",
+			Email:   "local@example.com",
+			Name:    "Local",
+		})
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "different login method")
+		mockDB.AssertExpectations(t)
+	})
+
+	t.Run("rejects inactive user", func(t *testing.T) {
+		mockDB.ExpectedCalls = nil
+		inactive := testutils.CreateTestUser(testutils.TestUUID(14), "bad@example.com", "Bad", false)
+		inactive.AuthProvider = "oidc"
+		inactive.OidcSubject = subText
+		inactive.Status = "inactive"
+		mockDB.On("FindUserByOIDCSubject", ctx, subText).Return(inactive, nil).Once()
+
+		_, err := service.LoginOIDC(ctx, OIDCLoginRequest{
+			Subject: "sub-123",
+			Email:   "bad@example.com",
+			Name:    "Bad",
+		})
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "inactive")
+		mockDB.AssertExpectations(t)
+	})
+
+	t.Run("propagates DB error on subject lookup", func(t *testing.T) {
+		mockDB.ExpectedCalls = nil
+		mockDB.On("FindUserByOIDCSubject", ctx, subText).Return(db.ClaimctlUser{}, assert.AnError).Once()
+
+		_, err := service.LoginOIDC(ctx, OIDCLoginRequest{
+			Subject: "sub-123",
+			Email:   "x@example.com",
+			Name:    "X",
+		})
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "failed to lookup OIDC user by subject")
+		mockDB.AssertExpectations(t)
+	})
+
+	t.Run("rejects missing subject", func(t *testing.T) {
+		_, err := service.LoginOIDC(ctx, OIDCLoginRequest{Email: "x@example.com"})
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "subject is required")
+	})
 }

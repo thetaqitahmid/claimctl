@@ -32,8 +32,8 @@ keyGeneration:
   # In production prefer appEncryption.existingSecret and manage the key externally.
   enabled: true
   image:
-    repository: bitnami/kubectl
-    tag: "1.29.0"
+    repository: bitnamilegacy/kubectl
+    tag: "1.33.4"
     pullPolicy: IfNotPresent
   secretName: "" # Defaults to fullname-secret if empty
   keyName: "app-encryption-key"

@@ -24,7 +24,8 @@ func (q *Queries) CountAdminUsers(ctx context.Context) (int64, error) {
 }
 
 const createUser = `-- name: CreateUser :exec
-INSERT INTO claimctl.users (email, name, password, role, status, last_login, auth_provider) VALUES ($1, $2, $3, $4, $5, $6, $7)
+INSERT INTO claimctl.users (email, name, password, role, status, last_login, auth_provider, oidc_subject)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
 `
 
 type CreateUserParams struct {
@@ -35,6 +36,7 @@ type CreateUserParams struct {
 	Status       string             `json:"status"`
 	LastLogin    pgtype.Timestamptz `json:"lastLogin"`
 	AuthProvider string             `json:"authProvider"`
+	OidcSubject  pgtype.Text        `json:"oidcSubject"`
 }
 
 func (q *Queries) CreateUser(ctx context.Context, arg CreateUserParams) error {
@@ -46,6 +48,7 @@ func (q *Queries) CreateUser(ctx context.Context, arg CreateUserParams) error {
 		arg.Status,
 		arg.LastLogin,
 		arg.AuthProvider,
+		arg.OidcSubject,
 	)
 	return err
 }
@@ -60,7 +63,7 @@ func (q *Queries) DeleteUserById(ctx context.Context, id uuid.UUID) error {
 }
 
 const findAllUsers = `-- name: FindAllUsers :many
-SELECT id, email, name, password, created_at, updated_at, role, status, last_login, failed_login_attempts, locked_until, slack_destination, teams_webhook_url, notification_email, auth_provider FROM claimctl.users
+SELECT id, email, name, password, created_at, updated_at, role, status, last_login, failed_login_attempts, locked_until, slack_destination, teams_webhook_url, notification_email, auth_provider, oidc_subject FROM claimctl.users
 `
 
 func (q *Queries) FindAllUsers(ctx context.Context) ([]ClaimctlUser, error) {
@@ -88,6 +91,7 @@ func (q *Queries) FindAllUsers(ctx context.Context) ([]ClaimctlUser, error) {
 			&i.TeamsWebhookUrl,
 			&i.NotificationEmail,
 			&i.AuthProvider,
+			&i.OidcSubject,
 		); err != nil {
 			return nil, err
 		}
@@ -100,7 +104,7 @@ func (q *Queries) FindAllUsers(ctx context.Context) ([]ClaimctlUser, error) {
 }
 
 const findUserByEmail = `-- name: FindUserByEmail :one
-SELECT id, email, name, password, created_at, updated_at, role, status, last_login, failed_login_attempts, locked_until, slack_destination, teams_webhook_url, notification_email, auth_provider FROM claimctl.users WHERE email=$1
+SELECT id, email, name, password, created_at, updated_at, role, status, last_login, failed_login_attempts, locked_until, slack_destination, teams_webhook_url, notification_email, auth_provider, oidc_subject FROM claimctl.users WHERE email=$1
 `
 
 func (q *Queries) FindUserByEmail(ctx context.Context, email string) (ClaimctlUser, error) {
@@ -122,12 +126,13 @@ func (q *Queries) FindUserByEmail(ctx context.Context, email string) (ClaimctlUs
 		&i.TeamsWebhookUrl,
 		&i.NotificationEmail,
 		&i.AuthProvider,
+		&i.OidcSubject,
 	)
 	return i, err
 }
 
 const findUserById = `-- name: FindUserById :one
-SELECT id, email, name, password, created_at, updated_at, role, status, last_login, failed_login_attempts, locked_until, slack_destination, teams_webhook_url, notification_email, auth_provider FROM claimctl.users WHERE id=$1
+SELECT id, email, name, password, created_at, updated_at, role, status, last_login, failed_login_attempts, locked_until, slack_destination, teams_webhook_url, notification_email, auth_provider, oidc_subject FROM claimctl.users WHERE id=$1
 `
 
 func (q *Queries) FindUserById(ctx context.Context, id uuid.UUID) (ClaimctlUser, error) {
@@ -149,6 +154,35 @@ func (q *Queries) FindUserById(ctx context.Context, id uuid.UUID) (ClaimctlUser,
 		&i.TeamsWebhookUrl,
 		&i.NotificationEmail,
 		&i.AuthProvider,
+		&i.OidcSubject,
+	)
+	return i, err
+}
+
+const findUserByOIDCSubject = `-- name: FindUserByOIDCSubject :one
+SELECT id, email, name, password, created_at, updated_at, role, status, last_login, failed_login_attempts, locked_until, slack_destination, teams_webhook_url, notification_email, auth_provider, oidc_subject FROM claimctl.users WHERE oidc_subject=$1
+`
+
+func (q *Queries) FindUserByOIDCSubject(ctx context.Context, oidcSubject pgtype.Text) (ClaimctlUser, error) {
+	row := q.db.QueryRow(ctx, findUserByOIDCSubject, oidcSubject)
+	var i ClaimctlUser
+	err := row.Scan(
+		&i.ID,
+		&i.Email,
+		&i.Name,
+		&i.Password,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.Role,
+		&i.Status,
+		&i.LastLogin,
+		&i.FailedLoginAttempts,
+		&i.LockedUntil,
+		&i.SlackDestination,
+		&i.TeamsWebhookUrl,
+		&i.NotificationEmail,
+		&i.AuthProvider,
+		&i.OidcSubject,
 	)
 	return i, err
 }
@@ -172,6 +206,31 @@ WHERE id = $1
 
 func (q *Queries) ResetUserFailedLoginAttempts(ctx context.Context, id uuid.UUID) error {
 	_, err := q.db.Exec(ctx, resetUserFailedLoginAttempts, id)
+	return err
+}
+
+const updateOIDCUser = `-- name: UpdateOIDCUser :exec
+UPDATE claimctl.users
+SET email=$1, name=$2, role=$3, oidc_subject=$4, last_login=CURRENT_TIMESTAMP, updated_at=CURRENT_TIMESTAMP
+WHERE id=$5
+`
+
+type UpdateOIDCUserParams struct {
+	Email       string      `json:"email"`
+	Name        string      `json:"name"`
+	Role        string      `json:"role"`
+	OidcSubject pgtype.Text `json:"oidcSubject"`
+	ID          uuid.UUID   `json:"id"`
+}
+
+func (q *Queries) UpdateOIDCUser(ctx context.Context, arg UpdateOIDCUserParams) error {
+	_, err := q.db.Exec(ctx, updateOIDCUser,
+		arg.Email,
+		arg.Name,
+		arg.Role,
+		arg.OidcSubject,
+		arg.ID,
+	)
 	return err
 }
 

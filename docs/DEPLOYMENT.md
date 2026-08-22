@@ -74,9 +74,9 @@ The backend is configured via environment variables. Create a `.env` file in the
 | `DB_USER`            | Database User      | `devuser`             |
 | `DB_PASSWORD`        | Database Password  | `devpass`             |
 | `DB_NAME`            | Database Name      | `devdb`               |
-| `LDAP_HOST`          | LDAP Server Host   | -                     |
-| `LDAP_PORT`          | LDAP Server Port   | -                     |
-| `LDAP_BIND_DN`       | LDAP Bind User     | -                     |
+| `OIDC_ISSUER`        | OIDC Issuer URL    | -                     |
+| `OIDC_CLIENT_ID`     | OIDC Client ID     | -                     |
+| `OIDC_CLIENT_SECRET` | OIDC Client Secret | -                     |
 | `APP_ENCRYPTION_KEY` | App Encryption Key | Random (per instance) |
 
 ## Database Management

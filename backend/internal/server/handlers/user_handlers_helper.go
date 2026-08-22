@@ -46,8 +46,18 @@ func GetUserFromContext(c *fiber.Ctx) (*db.ClaimctlUser, error) {
 	return nil, fmt.Errorf("no authenticated user found in context")
 }
 
-// getOIDCConfig retrieves OIDC configuration and initializes provider
-func (h *UserHandler) getOIDCConfig(c *fiber.Ctx) (*oidc.Provider, *oauth2.Config, error) {
+// isOIDCConfigured reports whether required OIDC settings are present.
+func (h *UserHandler) isOIDCConfigured(c *fiber.Ctx) bool {
+	ctx := c.Context()
+	issuer := h.settingsService.GetString(ctx, "oidc_issuer")
+	clientID := h.settingsService.GetString(ctx, "oidc_client_id")
+	clientSecret := h.settingsService.GetString(ctx, "oidc_client_secret")
+	return issuer != "" && clientID != "" && clientSecret != ""
+}
+
+// getOIDCConfig retrieves OIDC configuration and initializes provider.
+// Returns provider, oauth2 config, and client ID (for ID token verification).
+func (h *UserHandler) getOIDCConfig(c *fiber.Ctx) (*oidc.Provider, *oauth2.Config, string, error) {
 	ctx := c.Context()
 	issuer := h.settingsService.GetString(ctx, "oidc_issuer")
 	clientID := h.settingsService.GetString(ctx, "oidc_client_id")
@@ -56,7 +66,7 @@ func (h *UserHandler) getOIDCConfig(c *fiber.Ctx) (*oidc.Provider, *oauth2.Confi
 	scopesStr := h.settingsService.GetString(ctx, "oidc_scopes")
 
 	if issuer == "" || clientID == "" || clientSecret == "" {
-		return nil, nil, fmt.Errorf("OIDC configuration incomplete")
+		return nil, nil, "", fmt.Errorf("OIDC configuration incomplete")
 	}
 
 	// If redirect URL is not configured, derive it from the request
@@ -71,7 +81,7 @@ func (h *UserHandler) getOIDCConfig(c *fiber.Ctx) (*oidc.Provider, *oauth2.Confi
 
 	provider, err := oidc.NewProvider(ctx, issuer)
 	if err != nil {
-		return nil, nil, fmt.Errorf("failed to query provider: %w", err)
+		return nil, nil, "", fmt.Errorf("failed to query provider: %w", err)
 	}
 
 	conf := &oauth2.Config{
@@ -82,5 +92,30 @@ func (h *UserHandler) getOIDCConfig(c *fiber.Ctx) (*oidc.Provider, *oauth2.Confi
 		Scopes:       scopes,
 	}
 
-	return provider, conf, nil
+	return provider, conf, clientID, nil
+}
+
+func flattenGroupsClaim(v interface{}) []string {
+	switch g := v.(type) {
+	case []string:
+		return g
+	case []interface{}:
+		out := make([]string, 0, len(g))
+		for _, item := range g {
+			if s, ok := item.(string); ok {
+				out = append(out, s)
+			}
+		}
+		return out
+	case string:
+		if g == "" {
+			return nil
+		}
+		parts := strings.FieldsFunc(g, func(r rune) bool {
+			return r == ',' || r == ' '
+		})
+		return parts
+	default:
+		return nil
+	}
 }

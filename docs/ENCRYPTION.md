@@ -39,8 +39,8 @@ Currently, the following data is encrypted at rest:
 
 ### Application Settings (`app_settings`)
 
-Settings marked as `is_secret` (such as SMTP passwords, LDAP bind passwords, or
-OIDC client secrets) are automatically encrypted before being saved to the
+Settings marked as `is_secret` (such as SMTP passwords or OIDC client secrets)
+are automatically encrypted before being saved to the
 database.
 
 ### API Tokens

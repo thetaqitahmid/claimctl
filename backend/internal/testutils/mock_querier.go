@@ -32,6 +32,16 @@ func (m *MockQuerier) FindUserById(ctx context.Context, id uuid.UUID) (db.Claimc
 	return args.Get(0).(db.ClaimctlUser), args.Error(1)
 }
 
+func (m *MockQuerier) FindUserByOIDCSubject(ctx context.Context, oidcSubject pgtype.Text) (db.ClaimctlUser, error) {
+	args := m.Called(ctx, oidcSubject)
+	return args.Get(0).(db.ClaimctlUser), args.Error(1)
+}
+
+func (m *MockQuerier) UpdateOIDCUser(ctx context.Context, arg db.UpdateOIDCUserParams) error {
+	args := m.Called(ctx, arg)
+	return args.Error(0)
+}
+
 func (m *MockQuerier) VerifyUserEmailIsUnique(ctx context.Context, email string) (int64, error) {
 	args := m.Called(ctx, email)
 	return args.Get(0).(int64), args.Error(1)

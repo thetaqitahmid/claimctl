@@ -11,7 +11,7 @@ vi.mock("../store/api/auth", async () => {
   return {
     ...actual,
     useLoginMutation: vi.fn(),
-    useLoginLDAPMutation: vi.fn(),
+    useGetAuthMethodsQuery: vi.fn(),
   };
 });
 
@@ -21,20 +21,19 @@ vi.mock("../hooks/useNotification", () => ({
 
 describe("LoginPage", () => {
   const mockLogin = vi.fn();
-  const mockLDAPLogin = vi.fn();
   const mockShowNotification = vi.fn();
 
   beforeEach(() => {
     vi.clearAllMocks();
-    
+
     vi.mocked(authApi.useLoginMutation).mockReturnValue([
       mockLogin,
       { isLoading: false },
     ] as unknown as ReturnType<typeof authApi.useLoginMutation>);
-    vi.mocked(authApi.useLoginLDAPMutation).mockReturnValue([
-      mockLDAPLogin,
-      { isLoading: false },
-    ] as unknown as ReturnType<typeof authApi.useLoginLDAPMutation>);
+    vi.mocked(authApi.useGetAuthMethodsQuery).mockReturnValue({
+      data: { local: true, oidc: false },
+      isLoading: false,
+    } as unknown as ReturnType<typeof authApi.useGetAuthMethodsQuery>);
     vi.mocked(notificationHook.useNotificationContext).mockReturnValue({
       showNotification: mockShowNotification,
     } as unknown as ReturnType<typeof notificationHook.useNotificationContext>);
@@ -48,13 +47,19 @@ describe("LoginPage", () => {
     expect(screen.getByRole("button", { name: "signIn" })).toBeInTheDocument();
   });
 
-  it("toggles LDAP login", () => {
+  it("hides SSO button when OIDC is not configured", () => {
     render(<LoginPage />);
-    const ldapToggle = screen.getByRole("checkbox");
-    fireEvent.click(ldapToggle);
-    
-    expect(screen.getByText("ldapTitle")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "ldapSignIn" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "ssoSignIn" })).not.toBeInTheDocument();
+  });
+
+  it("shows SSO button when OIDC is configured", () => {
+    vi.mocked(authApi.useGetAuthMethodsQuery).mockReturnValue({
+      data: { local: true, oidc: true },
+      isLoading: false,
+    } as unknown as ReturnType<typeof authApi.useGetAuthMethodsQuery>);
+
+    render(<LoginPage />);
+    expect(screen.getByRole("button", { name: "ssoSignIn" })).toBeInTheDocument();
   });
 
   it("calls login mutation on submit", async () => {
@@ -65,32 +70,13 @@ describe("LoginPage", () => {
     });
 
     render(<LoginPage />);
-    
+
     fireEvent.change(screen.getByLabelText("emailLabel"), { target: { value: "test@example.com" } });
     fireEvent.change(screen.getByLabelText("passwordLabel"), { target: { value: "password" } });
     fireEvent.click(screen.getByRole("button", { name: "signIn" }));
 
     await waitFor(() => {
       expect(mockLogin).toHaveBeenCalledWith({ email: "test@example.com", password: "password" });
-    });
-  });
-
-  it("calls LDAP login mutation when toggled", async () => {
-    mockLDAPLogin.mockReturnValue({
-      unwrap: () => Promise.resolve({
-        user: { name: "LDAP User", email: "ldap@example.com", role: "user" }
-      })
-    });
-
-    render(<LoginPage />);
-    fireEvent.click(screen.getByRole("checkbox")); // Enable LDAP
-    
-    fireEvent.change(screen.getByLabelText("emailLabel"), { target: { value: "ldap@example.com" } });
-    fireEvent.change(screen.getByLabelText("passwordLabel"), { target: { value: "password" } });
-    fireEvent.click(screen.getByRole("button", { name: "ldapSignIn" }));
-
-    await waitFor(() => {
-      expect(mockLDAPLogin).toHaveBeenCalledWith({ email: "ldap@example.com", password: "password" });
     });
   });
 
@@ -102,7 +88,7 @@ describe("LoginPage", () => {
     });
 
     render(<LoginPage />);
-    
+
     fireEvent.change(screen.getByLabelText("emailLabel"), { target: { value: "test@example.com" } });
     fireEvent.change(screen.getByLabelText("passwordLabel"), { target: { value: "wrong" } });
     fireEvent.click(screen.getByRole("button", { name: "signIn" }));

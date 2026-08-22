@@ -2,15 +2,16 @@ package services
 
 import (
 	"context"
+	"database/sql"
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
-	"strings"
 	"time"
 
 	"github.com/google/uuid"
-
-	"github.com/go-ldap/ldap/v3"
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/thetaqitahmid/claimctl/internal/db"
@@ -23,6 +24,15 @@ type LoginRequest struct {
 	Password string `json:"password"`
 }
 
+type OIDCLoginRequest struct {
+	Subject string
+	Email   string
+	Name    string
+	// IsAdmin is true when the IdP group claim matches the configured admin group.
+	// When false, existing roles are preserved (promote-only).
+	IsAdmin bool
+}
+
 type UserService interface {
 	Login(ctx context.Context, req LoginRequest) (*db.ClaimctlUser, error)
 	CreateUser(ctx context.Context, req db.CreateUserParams) (*db.ClaimctlUser, error)
@@ -31,8 +41,7 @@ type UserService interface {
 	UpdateUser(ctx context.Context, req *UpdateUserRequest) error
 	DeleteUser(ctx context.Context, id uuid.UUID) error
 	EnsureAdminExists(ctx context.Context) error
-	LoginLDAP(ctx context.Context, email, password string) (*db.ClaimctlUser, error)
-	LoginOIDC(ctx context.Context, email, name string) (*db.ClaimctlUser, error)
+	LoginOIDC(ctx context.Context, req OIDCLoginRequest) (*db.ClaimctlUser, error)
 	UpdateChannelConfig(ctx context.Context, userID uuid.UUID, slackDest, teamsUrl, notificationEmail string) (*db.ClaimctlUser, error)
 	UpdatePassword(ctx context.Context, userID uuid.UUID, currentPassword, newPassword string) error
 }
@@ -71,6 +80,11 @@ func (s *userService) Login(ctx context.Context, req LoginRequest) (*db.Claimctl
 
 	if user.Status != "active" {
 		return nil, fmt.Errorf("user %s is inactive", req.Email)
+	}
+
+	if user.AuthProvider != "local" {
+		bcrypt.CompareHashAndPassword(dummyHash, []byte(req.Password))
+		return nil, fmt.Errorf("Invalid password")
 	}
 
 	// Check if account is locked
@@ -341,6 +355,7 @@ func (s *userService) createDefaultAdmin(ctx context.Context) error {
 		Status:       status,
 		LastLogin:    pgtype.Timestamptz{Valid: false},
 		AuthProvider: "local",
+		OidcSubject:  pgtype.Text{Valid: false},
 	})
 
 	if err != nil {
@@ -351,187 +366,136 @@ func (s *userService) createDefaultAdmin(ctx context.Context) error {
 	return nil
 }
 
-func (s *userService) LoginLDAP(ctx context.Context, email, password string) (*db.ClaimctlUser, error) {
-	if email == "" || password == "" {
-		return nil, fmt.Errorf("email and password are required")
-	}
-
-	l, err := s.connectLDAP()
-	if err != nil {
-		return nil, fmt.Errorf("failed to connect to LDAP: %w", err)
-	}
-	defer l.Close()
-
-	ldapBaseDN := utils.GetEnv("LDAP_BASE_DN", "dc=example,dc=com")
-	ldapUserFilter := utils.GetEnv("LDAP_USER_FILTER", "(&(objectClass=person)(uid=%s))")
-	searchFilter := fmt.Sprintf(ldapUserFilter, ldap.EscapeFilter(email))
-
-	searchRequest := ldap.NewSearchRequest(
-		ldapBaseDN,
-		ldap.ScopeWholeSubtree, ldap.NeverDerefAliases, 0, 0, false,
-		searchFilter,
-		[]string{"dn", "cn", "mail", "memberOf"},
-		nil,
-	)
-
-	sr, err := l.Search(searchRequest)
-	if err != nil {
-		return nil, fmt.Errorf("LDAP user search failed: %w", err)
-	}
-
-	if len(sr.Entries) != 1 {
-		return nil, fmt.Errorf("user not found or too many results")
-	}
-
-	userEntry := sr.Entries[0]
-	userDN := userEntry.DN
-
-	err = l.Bind(userDN, password)
-	if err != nil {
-		return nil, fmt.Errorf("LDAP authentication failed: %w", err)
-	}
-
-	return s.syncLDAPUser(ctx, userEntry)
+func isNotFound(err error) bool {
+	return errors.Is(err, sql.ErrNoRows) || errors.Is(err, pgx.ErrNoRows)
 }
 
-func (s *userService) connectLDAP() (*ldap.Conn, error) {
-	ldapURL := utils.GetEnv("LDAP_URL", "ldap://localhost:389")
-	ldapBindDN := utils.GetEnv("LDAP_BIND_DN", "cn=admin,dc=example,dc=com")
-	ldapBindPassword := utils.GetEnv("LDAP_BIND_PASSWORD", "admin")
-
-	l, err := ldap.DialURL(ldapURL)
-	if err != nil {
-		return nil, err
+func isUniqueViolation(err error) bool {
+	var pgErr *pgconn.PgError
+	if errors.As(err, &pgErr) {
+		return pgErr.Code == "23505"
 	}
-
-	err = l.Bind(ldapBindDN, ldapBindPassword)
-	if err != nil {
-		l.Close()
-		return nil, err
-	}
-
-	return l, nil
+	return false
 }
 
-func (s *userService) syncLDAPUser(ctx context.Context, entry *ldap.Entry) (*db.ClaimctlUser, error) {
-	name := entry.GetAttributeValue("cn")
-	email := entry.GetAttributeValue("mail")
-
-	if email == "" {
-		return nil, fmt.Errorf("LDAP entry is missing 'mail' attribute")
+func (s *userService) LoginOIDC(ctx context.Context, req OIDCLoginRequest) (*db.ClaimctlUser, error) {
+	if req.Subject == "" {
+		return nil, fmt.Errorf("OIDC subject is required")
 	}
+	if req.Email == "" {
+		return nil, fmt.Errorf("email is required for OIDC login")
+	}
+	name := req.Name
 	if name == "" {
-		name = email
+		name = req.Email
 	}
 
-	ldapAdminGroupDN := utils.GetEnv("LDAP_ADMIN_GROUP_DN", "cn=admins,dc=example,dc=com")
+	subText := pgtype.Text{String: req.Subject, Valid: true}
 
-	role := "user"
-
-	memberOf := entry.GetAttributeValues("memberOf")
-	for _, group := range memberOf {
-		if strings.EqualFold(group, ldapAdminGroupDN) {
-
-			role = "admin"
-			break
+	// 1. Prefer stable subject lookup
+	user, err := s.db.FindUserByOIDCSubject(ctx, subText)
+	if err == nil {
+		if user.Status != "active" {
+			return nil, fmt.Errorf("user is inactive")
 		}
+		role := user.Role
+		if req.IsAdmin {
+			role = "admin"
+		}
+		if err := s.db.UpdateOIDCUser(ctx, db.UpdateOIDCUserParams{
+			Email:       req.Email,
+			Name:        name,
+			Role:        role,
+			OidcSubject: subText,
+			ID:          user.ID,
+		}); err != nil {
+			if isUniqueViolation(err) {
+				return nil, fmt.Errorf("email already in use by another account")
+			}
+			return nil, fmt.Errorf("failed to update OIDC user: %w", err)
+		}
+		user.Email = req.Email
+		user.Name = name
+		user.Role = role
+		return &user, nil
+	}
+	if !isNotFound(err) {
+		return nil, fmt.Errorf("failed to lookup OIDC user by subject: %w", err)
 	}
 
-	user, err := s.db.FindUserByEmail(ctx, email)
+	// 2. Fallback: email lookup for first-time bind / legacy OIDC users
+	user, err = s.db.FindUserByEmail(ctx, req.Email)
 	if err != nil {
-		dummyPass := "LDAP_AUTH_" + utils.GenerateRandomString(16)
-		hashedPassword, _ := bcrypt.GenerateFromPassword([]byte(dummyPass), bcrypt.DefaultCost)
+		if !isNotFound(err) {
+			return nil, fmt.Errorf("failed to lookup user by email: %w", err)
+		}
+
+		role := "user"
+		if req.IsAdmin {
+			role = "admin"
+		}
+		dummyPass := "OIDC_AUTH_" + utils.GenerateRandomString(16)
+		hashedPassword, hashErr := bcrypt.GenerateFromPassword([]byte(dummyPass), bcrypt.DefaultCost)
+		if hashErr != nil {
+			return nil, fmt.Errorf("failed to hash password: %w", hashErr)
+		}
 
 		createParams := db.CreateUserParams{
-			Email:        email,
+			Email:        req.Email,
 			Name:         name,
 			Password:     string(hashedPassword),
 			Role:         role,
 			Status:       "active",
-			LastLogin:    pgtype.Timestamptz{Valid: true, Time: pgtype.Timestamptz{}.Time},
-			AuthProvider: "ldap",
-		}
-
-		err = s.db.CreateUser(ctx, createParams)
-		if err != nil {
-			return nil, fmt.Errorf("failed to sync (create) LDAP user locally: %w", err)
-		}
-
-		user, err = s.db.FindUserByEmail(ctx, email)
-		if err != nil {
-			return nil, fmt.Errorf("failed to retrieve synced user: %w", err)
-		}
-	} else {
-		err = s.db.UpdateUserById(ctx, db.UpdateUserByIdParams{
-			ID:       user.ID,
-			Email:    email,
-			Name:     name,
-			Password: user.Password,
-
-			Role:      role,
-			LastLogin: pgtype.Timestamptz{Valid: true, Time: pgtype.Timestamptz{}.Time},
-			Status:    user.Status,
-		})
-		if err != nil {
-			return nil, fmt.Errorf("failed to sync (update) LDAP user locally: %w", err)
-		}
-
-		user.Role = role
-		user.Name = name
-	}
-
-	return &user, nil
-}
-
-func (s *userService) LoginOIDC(ctx context.Context, email, name string) (*db.ClaimctlUser, error) {
-	if email == "" {
-		return nil, fmt.Errorf("email is required for OIDC login")
-	}
-	if name == "" {
-		name = email
-	}
-
-	user, err := s.db.FindUserByEmail(ctx, email)
-	if err != nil {
-		dummyPass := "OIDC_AUTH_" + utils.GenerateRandomString(16)
-		hashedPassword, _ := bcrypt.GenerateFromPassword([]byte(dummyPass), bcrypt.DefaultCost)
-
-		createParams := db.CreateUserParams{
-			Email:        email,
-			Name:         name,
-			Password:     string(hashedPassword),
-			Role:         "user",
-			Status:       "active",
-			LastLogin:    pgtype.Timestamptz{Valid: true, Time: pgtype.Timestamptz{}.Time},
+			LastLogin:    pgtype.Timestamptz{Valid: true, Time: time.Now()},
 			AuthProvider: "oidc",
+			OidcSubject:  subText,
 		}
 
-		err = s.db.CreateUser(ctx, createParams)
-		if err != nil {
+		if err := s.db.CreateUser(ctx, createParams); err != nil {
+			if isUniqueViolation(err) {
+				return nil, fmt.Errorf("email already in use by another account")
+			}
 			return nil, fmt.Errorf("failed to create OIDC user: %w", err)
 		}
 
-		user, err = s.db.FindUserByEmail(ctx, email)
+		user, err = s.db.FindUserByOIDCSubject(ctx, subText)
 		if err != nil {
 			return nil, fmt.Errorf("failed to retrieve created OIDC user: %w", err)
 		}
-	} else {
-		err = s.db.UpdateUserById(ctx, db.UpdateUserByIdParams{
-			ID:       user.ID,
-			Email:    email,
-			Name:     name,
-			Password: user.Password,
-
-			Role:      user.Role,
-			LastLogin: pgtype.Timestamptz{Valid: true, Time: pgtype.Timestamptz{}.Time},
-			Status:    user.Status,
-		})
-		if err != nil {
-			return nil, fmt.Errorf("failed to update OIDC user: %w", err)
-		}
-		user.Name = name
+		return &user, nil
 	}
 
+	// Existing account with this email
+	if user.AuthProvider != "oidc" {
+		return nil, fmt.Errorf("account exists with a different login method")
+	}
+	if user.OidcSubject.Valid && user.OidcSubject.String != req.Subject {
+		return nil, fmt.Errorf("OIDC subject mismatch for existing user")
+	}
+	if user.Status != "active" {
+		return nil, fmt.Errorf("user is inactive")
+	}
+
+	role := user.Role
+	if req.IsAdmin {
+		role = "admin"
+	}
+	if err := s.db.UpdateOIDCUser(ctx, db.UpdateOIDCUserParams{
+		Email:       req.Email,
+		Name:        name,
+		Role:        role,
+		OidcSubject: subText,
+		ID:          user.ID,
+	}); err != nil {
+		if isUniqueViolation(err) {
+			return nil, fmt.Errorf("email already in use by another account")
+		}
+		return nil, fmt.Errorf("failed to update OIDC user: %w", err)
+	}
+	user.Email = req.Email
+	user.Name = name
+	user.Role = role
+	user.OidcSubject = subText
 	return &user, nil
 }
 

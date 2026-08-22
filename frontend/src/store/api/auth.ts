@@ -32,6 +32,11 @@ interface authResponse {
   user: User;
 }
 
+interface AuthMethodsResponse {
+  local: boolean;
+  oidc: boolean;
+}
+
 export const authApiSlice = createApi({
   reducerPath: "auth",
   tagTypes: ["User"],
@@ -45,13 +50,8 @@ export const authApiSlice = createApi({
       }),
       invalidatesTags: ["User"],
     }),
-    loginLDAP: builder.mutation<authResponse, credentialType>({
-      query: (credentials: credentialType) => ({
-        url: "/auth/ldap",
-        method: "POST",
-        body: credentials,
-      }),
-      invalidatesTags: ["User"],
+    getAuthMethods: builder.query<AuthMethodsResponse, void>({
+      query: () => "/auth/methods",
     }),
     logout: builder.mutation<void, void>({
       query: () => ({
@@ -92,5 +92,9 @@ export const authApiSlice = createApi({
   }),
 });
 
-export const { useLoginMutation, useLogoutMutation, useGetMeQuery, useLoginLDAPMutation } =
-  authApiSlice;
+export const {
+  useLoginMutation,
+  useLogoutMutation,
+  useGetMeQuery,
+  useGetAuthMethodsQuery,
+} = authApiSlice;

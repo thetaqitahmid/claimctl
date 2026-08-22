@@ -107,21 +107,6 @@ describe("Profile Page", () => {
     expect(screen.getByText("Change Password")).toBeInTheDocument();
   });
 
-  it("hides Change Password button for LDAP users", () => {
-    render(<Profile />, {
-      preloadedState: {
-        authSlice: {
-          user: "LDAP User",
-          email: "ldap@example.com",
-          role: "user",
-          authProvider: "ldap",
-        },
-      },
-    });
-
-    expect(screen.queryByText("Change Password")).not.toBeInTheDocument();
-  });
-
   it("hides Change Password button for OIDC users", () => {
     render(<Profile />, {
       preloadedState: {

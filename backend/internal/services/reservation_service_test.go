@@ -100,7 +100,7 @@ func TestReservationService_CreateReservation(t *testing.T) {
 				// Find Resource for Notification
 				mockDB.On("FindResourceById", ctx, testutils.TestUUID(1)).Return(db.ClaimctlResource{Name: "Test Resource"}, nil)
 
-				mockNotification.On("Notify", ctx, testutils.TestUUID(1), "reservation_created", mock.Anything).Return(nil)
+				mockNotification.On("Notify", mock.Anything, testutils.TestUUID(1), "reservation_created", mock.Anything).Return(nil)
 
 				// Mock webhooks trigger
 				mockDB.On("GetWebhooksForEvent", ctx, mock.MatchedBy(func(arg db.GetWebhooksForEventParams) bool {
@@ -199,7 +199,7 @@ func TestReservationService_ActivateReservation(t *testing.T) {
 				// Find Resource for Broadcast
 				mockDB.On("FindResourceById", ctx, testutils.TestUUID(1)).Return(db.ClaimctlResource{Name: "Test Resource"}, nil)
 
-				mockNotification.On("Notify", ctx, testutils.TestUUID(1), "reservation_activated", mock.Anything).Return(nil)
+				mockNotification.On("Notify", mock.Anything, testutils.TestUUID(1), "reservation_activated", mock.Anything).Return(nil)
 
 				// Mock webhooks trigger
 				mockDB.On("GetWebhooksForEvent", ctx, mock.MatchedBy(func(arg db.GetWebhooksForEventParams) bool {
@@ -320,7 +320,7 @@ func TestReservationService_CompleteReservation(t *testing.T) {
 					return arg.ResourceID == testutils.TestUUID(1) && arg.Column2 == "reservation.completed"
 				})).Return([]db.ClaimctlWebhook{}, nil)
 
-				mockNotification.On("Notify", ctx, testutils.TestUUID(1), "reservation_completed", mock.Anything).Return(nil)
+				mockNotification.On("Notify", mock.Anything, testutils.TestUUID(1), "reservation_completed", mock.Anything).Return(nil)
 
 				// Find Resource for Broadcast
 				mockDB.On("FindResourceById", ctx, testutils.TestUUID(1)).Return(db.ClaimctlResource{Name: "Test Resource"}, nil)
@@ -349,7 +349,7 @@ func TestReservationService_CompleteReservation(t *testing.T) {
 					return arg.ResourceID == testutils.TestUUID(1) && arg.Column2 == "reservation.completed"
 				})).Return([]db.ClaimctlWebhook{}, nil)
 
-				mockNotification.On("Notify", ctx, testutils.TestUUID(1), "reservation_completed", mock.Anything).Return(nil)
+				mockNotification.On("Notify", mock.Anything, testutils.TestUUID(1), "reservation_completed", mock.Anything).Return(nil)
 
 				// Find Resource for Broadcast
 				mockDB.On("FindResourceById", ctx, testutils.TestUUID(1)).Return(db.ClaimctlResource{Name: "Test Resource"}, nil)
@@ -375,7 +375,7 @@ func TestReservationService_CompleteReservation(t *testing.T) {
 					return arg.ResourceID == testutils.TestUUID(1) && arg.Column2 == "reservation.activated"
 				})).Return([]db.ClaimctlWebhook{}, nil)
 
-				mockNotification.On("Notify", ctx, testutils.TestUUID(2), "reservation_activated", mock.Anything).Return(nil)
+				mockNotification.On("Notify", mock.Anything, testutils.TestUUID(2), "reservation_activated", mock.Anything).Return(nil)
 
 				// Get updated reservation after activation
 				updatedReservation := testutils.CreateTestReservation(testutils.TestUUID(2), testutils.TestUUID(1), testutils.TestUUID(2), "active", 0)
@@ -479,7 +479,7 @@ func TestReservationService_CancelReservation(t *testing.T) {
 				// Find Resource for Broadcast
 				mockDB.On("FindResourceById", ctx, testutils.TestUUID(1)).Return(db.ClaimctlResource{Name: "Test Resource"}, nil)
 
-				mockNotification.On("Notify", ctx, testutils.TestUUID(1), "reservation_cancelled", mock.Anything).Return(nil)
+				mockNotification.On("Notify", mock.Anything, testutils.TestUUID(1), "reservation_cancelled", mock.Anything).Return(nil)
 			},
 			shouldSucceed: true,
 		},
@@ -505,7 +505,7 @@ func TestReservationService_CancelReservation(t *testing.T) {
 				// Find Resource for Broadcast
 				mockDB.On("FindResourceById", ctx, testutils.TestUUID(1)).Return(db.ClaimctlResource{Name: "Test Resource"}, nil)
 
-				mockNotification.On("Notify", ctx, testutils.TestUUID(1), "reservation_cancelled", mock.Anything).Return(nil)
+				mockNotification.On("Notify", mock.Anything, testutils.TestUUID(1), "reservation_cancelled", mock.Anything).Return(nil)
 			},
 			shouldSucceed: true,
 		},
@@ -741,7 +741,7 @@ func TestReservationService_ProcessQueue(t *testing.T) {
 				// Find Resource for Broadcast
 				mockDB.On("FindResourceById", ctx, testutils.TestUUID(1)).Return(db.ClaimctlResource{Name: "Test Resource"}, nil)
 
-				mockNotification.On("Notify", ctx, testutils.TestUUID(1), "reservation_activated", mock.Anything).Return(nil)
+				mockNotification.On("Notify", mock.Anything, testutils.TestUUID(1), "reservation_activated", mock.Anything).Return(nil)
 
 				// Mock webhooks trigger
 				mockDB.On("GetWebhooksForEvent", ctx, mock.MatchedBy(func(arg db.GetWebhooksForEventParams) bool {
@@ -859,5 +859,47 @@ func TestReservationService_GetUserQueuePosition(t *testing.T) {
 
 			mockDB.AssertExpectations(t)
 		})
+	}
+}
+
+// TestCreateReservation_NotifyContextDetached guards against regressions
+// where Notify is spawned with the raw request context: Fiber recycles it
+// once the handler returns, racing the goroutine's DB reads. The mock
+// expectations elsewhere use mock.Anything for ctx, which would not catch
+// such a regression -- this test asserts identity explicitly.
+func TestCreateReservation_NotifyContextDetached(t *testing.T) {
+	ctx := testutils.TestContext()
+	mockDB := &testutils.MockQuerier{}
+	mockHistory := &testutils.MockReservationHistoryService{}
+	secretSvc := NewSecretService(mockDB, "MTIzNDU2Nzg5MDEyMzQ1Njc4OTAxMjM0NTY3ODkwMTI=")
+	webhookSvc := NewWebhookService(mockDB, secretSvc, "")
+	mockRealtime := &MockRealtimeService{}
+	mockNotification := &MockNotificationService{}
+	service := NewReservationService(mockDB, mockHistory, webhookSvc, mockRealtime, mockNotification)
+
+	mockDB.On("AcquireResourceLock", ctx, testutils.TestUUID(1)).Return(uuid.UUID{}, nil)
+	mockDB.On("GetResourceMaintenanceStatus", ctx, testutils.TestUUID(1)).Return(pgtype.Bool{Bool: false, Valid: true}, nil)
+	mockDB.On("FindUserReservationForResource", ctx, mock.AnythingOfType("db.FindUserReservationForResourceParams")).Return(db.ClaimctlReservation{}, assert.AnError)
+	reservation := testutils.CreateTestReservation(testutils.TestUUID(1), testutils.TestUUID(1), testutils.TestUUID(1), "pending", 1)
+	mockDB.On("CreateReservation", ctx, mock.AnythingOfType("db.CreateReservationParams")).Return(reservation, nil)
+	mockDB.On("FindResourceById", ctx, testutils.TestUUID(1)).Return(db.ClaimctlResource{Name: "Test Resource"}, nil)
+	mockDB.On("GetWebhooksForEvent", ctx, mock.Anything).Return([]db.ClaimctlWebhook{}, nil)
+
+	notifyCtx := make(chan context.Context, 1)
+	mockNotification.On("Notify", mock.Anything, testutils.TestUUID(1), "reservation_created", mock.Anything).
+		Run(func(args mock.Arguments) {
+			notifyCtx <- args.Get(0).(context.Context)
+		}).
+		Return(nil)
+
+	_, err := service.CreateReservation(ctx, testutils.TestUUID(1), testutils.TestUUID(1), nil)
+	require.NoError(t, err)
+
+	select {
+	case got := <-notifyCtx:
+		assert.NotEqual(t, ctx, got, "Notify must not receive the raw request context")
+		assert.NoError(t, got.Err(), "detached context must never be canceled")
+	case <-time.After(2 * time.Second):
+		t.Fatal("Notify was not called")
 	}
 }

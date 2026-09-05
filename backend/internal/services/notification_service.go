@@ -41,13 +41,17 @@ func (s *notificationService) Notify(ctx context.Context, userID uuid.UUID, even
 	// Iterate over all available dispatchers
 	for channel, dispatcher := range s.dispatchers {
 		pref, err := s.prefs.GetPreference(ctx, userID, event, channel)
-		enabled := false
-
-		if err == nil {
-			enabled = pref.Enabled
+		if err != nil {
+			// No row means the channel is disabled (opt-in default);
+			// anything else is a real error worth surfacing.
+			if !isNotFound(err) {
+				slog.Error("Failed to load notification preference",
+					"user_id", userID, "event", event, "channel", channel, "error", err)
+			}
+			continue
 		}
 
-		if !enabled {
+		if !pref.Enabled {
 			continue
 		}
 

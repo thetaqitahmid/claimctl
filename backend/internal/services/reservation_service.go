@@ -121,8 +121,10 @@ func (s *reservationService) CreateReservation(ctx context.Context, userID uuid.
 	_ = s.webhookSvc.TriggerWebhooks(ctx, resourceID, "reservation.created", reservation)
 
 	// Send Notification
+	// Detach from the request context: the handler returns before this
+	// goroutine finishes its DB reads, and Fiber recycles request contexts.
 	resource, _ := s.store.FindResourceById(ctx, resourceID)
-	go s.notificationSvc.Notify(ctx, userID, "reservation_created", NotificationPayload{
+	go s.notificationSvc.Notify(context.WithoutCancel(ctx), userID, "reservation_created", NotificationPayload{
 		Subject: "Reservation Created",
 		Message: fmt.Sprintf("Your reservation for resource '%s' has been created.", resource.Name),
 	})
@@ -157,7 +159,7 @@ func (s *reservationService) CancelAllForResource(ctx context.Context, resourceI
 		Payload: map[string]interface{}{
 			"resource_id":   resourceID,
 			"resource_name": resource.Name,
-			"action":        "created",
+			"action":        "cancel_all",
 		},
 	})
 	return nil
@@ -233,7 +235,7 @@ func (s *reservationService) activateReservationInternal(ctx context.Context, re
 
 	// Send Notification
 	activatedResource, _ := s.store.FindResourceById(ctx, reservation.ResourceID)
-	go s.notificationSvc.Notify(ctx, reservation.UserID, "reservation_activated", NotificationPayload{
+	go s.notificationSvc.Notify(context.WithoutCancel(ctx), reservation.UserID, "reservation_activated", NotificationPayload{
 		Subject: "Reservation Activated",
 		Message: fmt.Sprintf("Your reservation for resource '%s' is now active.", activatedResource.Name),
 	})
@@ -309,7 +311,7 @@ func (s *reservationService) CompleteReservation(ctx context.Context, reservatio
 
 	// Send Notification
 	completedResource, _ := s.store.FindResourceById(ctx, reservation.ResourceID)
-	go s.notificationSvc.Notify(ctx, reservation.UserID, "reservation_completed", NotificationPayload{
+	go s.notificationSvc.Notify(context.WithoutCancel(ctx), reservation.UserID, "reservation_completed", NotificationPayload{
 		Subject: "Reservation Completed",
 		Message: fmt.Sprintf("Your reservation for resource '%s' has been completed.", completedResource.Name),
 	})
@@ -380,7 +382,7 @@ func (s *reservationService) CancelReservation(ctx context.Context, reservationI
 
 	// Send Notification
 	cancelledRes, _ := s.store.FindResourceById(ctx, reservation.ResourceID)
-	go s.notificationSvc.Notify(ctx, reservation.UserID, "reservation_cancelled", NotificationPayload{
+	go s.notificationSvc.Notify(context.WithoutCancel(ctx), reservation.UserID, "reservation_cancelled", NotificationPayload{
 		Subject: "Reservation Cancelled",
 		Message: fmt.Sprintf("Your reservation for resource '%s' has been cancelled.", cancelledRes.Name),
 	})
@@ -566,7 +568,7 @@ func (s *reservationService) ExpireReservations(ctx context.Context) error {
 
 		// Send Notification
 		expiredResource, _ := s.store.FindResourceById(ctx, res.ResourceID)
-		go s.notificationSvc.Notify(ctx, res.UserID, "reservation_expired", NotificationPayload{
+		go s.notificationSvc.Notify(context.WithoutCancel(ctx), res.UserID, "reservation_expired", NotificationPayload{
 			Subject: "Reservation Expired",
 			Message: fmt.Sprintf("Your reservation for resource '%s' has expired.", expiredResource.Name),
 		})

@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"net/http"
 	"net/smtp"
+	"strings"
+	"time"
 
 	"github.com/slack-go/slack"
 )
@@ -58,11 +60,15 @@ func (d *EmailDispatcher) Dispatch(ctx context.Context, recipient string, payloa
 
 // SlackDispatcher sends messages to Slack via Webhook or Bot Token
 type SlackDispatcher struct {
-	settings *SettingsService
+	settings   *SettingsService
+	httpClient *http.Client
 }
 
 func NewSlackDispatcher(settings *SettingsService) *SlackDispatcher {
-	return &SlackDispatcher{settings: settings}
+	return &SlackDispatcher{
+		settings:   settings,
+		httpClient: newSafeHTTPClient(10 * time.Second),
+	}
 }
 
 func (d *SlackDispatcher) Type() string {
@@ -76,7 +82,7 @@ func (d *SlackDispatcher) Type() string {
 // Otherwise, we use the bot token from settings.
 func (d *SlackDispatcher) Dispatch(ctx context.Context, recipient string, payload NotificationPayload) error {
 	// 1. Check if recipient is a Webhook URL
-	if len(recipient) > 4 && recipient[:4] == "http" {
+	if strings.HasPrefix(strings.ToLower(recipient), "http") {
 		return d.dispatchWebhook(ctx, recipient, payload)
 	}
 
@@ -87,6 +93,8 @@ func (d *SlackDispatcher) Dispatch(ctx context.Context, recipient string, payloa
 	}
 
 	api := slack.New(token)
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
 	_, _, err := api.PostMessageContext(ctx, recipient, slack.MsgOptionText(payload.Message, false))
 	if err != nil {
 		return fmt.Errorf("failed to send slack message: %w", err)
@@ -95,6 +103,10 @@ func (d *SlackDispatcher) Dispatch(ctx context.Context, recipient string, payloa
 }
 
 func (d *SlackDispatcher) dispatchWebhook(ctx context.Context, url string, payload NotificationPayload) error {
+	if err := ValidateWebhookURL(ctx, url); err != nil {
+		return fmt.Errorf("invalid slack webhook url: %w", err)
+	}
+
 	msg := map[string]string{"text": fmt.Sprintf("*%s*\n%s", payload.Subject, payload.Message)}
 	body, _ := json.Marshal(msg)
 
@@ -104,8 +116,7 @@ func (d *SlackDispatcher) dispatchWebhook(ctx context.Context, url string, paylo
 	}
 	req.Header.Set("Content-Type", "application/json")
 
-	client := &http.Client{}
-	resp, err := client.Do(req)
+	resp, err := d.httpClient.Do(req)
 	if err != nil {
 		return err
 	}
@@ -118,10 +129,12 @@ func (d *SlackDispatcher) dispatchWebhook(ctx context.Context, url string, paylo
 }
 
 // TeamsDispatcher sends messages to Microsoft Teams via Webhook
-type TeamsDispatcher struct{}
+type TeamsDispatcher struct {
+	httpClient *http.Client
+}
 
 func NewTeamsDispatcher() *TeamsDispatcher {
-	return &TeamsDispatcher{}
+	return &TeamsDispatcher{httpClient: newSafeHTTPClient(10 * time.Second)}
 }
 
 func (d *TeamsDispatcher) Type() string {
@@ -133,6 +146,9 @@ func (d *TeamsDispatcher) Dispatch(ctx context.Context, recipient string, payloa
 	webhookURL := recipient
 	if webhookURL == "" {
 		return fmt.Errorf("Teams webhook URL missing")
+	}
+	if err := ValidateWebhookURL(ctx, webhookURL); err != nil {
+		return fmt.Errorf("invalid teams webhook url: %w", err)
 	}
 
 	card := map[string]interface{}{
@@ -173,8 +189,7 @@ func (d *TeamsDispatcher) Dispatch(ctx context.Context, recipient string, payloa
 	}
 	req.Header.Set("Content-Type", "application/json")
 
-	client := &http.Client{}
-	resp, err := client.Do(req)
+	resp, err := d.httpClient.Do(req)
 	if err != nil {
 		return err
 	}

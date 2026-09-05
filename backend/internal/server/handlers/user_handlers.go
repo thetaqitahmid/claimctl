@@ -623,6 +623,23 @@ func (h *UserHandler) UpdateChannelConfig(c *fiber.Ctx) error {
 		}
 	}
 
+	if payload.TeamsWebhookUrl != "" {
+		if err := services.ValidateWebhookURL(c.Context(), payload.TeamsWebhookUrl); err != nil {
+			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "Invalid Teams webhook URL: " + err.Error()})
+		}
+	}
+
+	if payload.SlackDestination != "" {
+		// Slack destination is either an incoming-webhook URL or a channel ID.
+		if strings.HasPrefix(strings.ToLower(payload.SlackDestination), "http") {
+			if err := services.ValidateWebhookURL(c.Context(), payload.SlackDestination); err != nil {
+				return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "Invalid Slack destination: " + err.Error()})
+			}
+		} else if len(payload.SlackDestination) > 128 || strings.ContainsAny(payload.SlackDestination, " \t\r\n") {
+			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "Invalid Slack channel ID"})
+		}
+	}
+
 	updatedUser, err := h.userService.UpdateChannelConfig(c.Context(), userID, payload.SlackDestination, payload.TeamsWebhookUrl, payload.NotificationEmail)
 	if err != nil {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "Failed to update channel config"})

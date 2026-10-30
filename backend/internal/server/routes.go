@@ -24,7 +24,6 @@ import (
 // Define the routes
 func SetupRoutes(ctx context.Context, app *fiber.App, dbConn *connection.DBConn, privateKey *rsa.PrivateKey, publicKey *rsa.PublicKey, encryptionKey string) {
 	dbQueries := db.NewStore(dbConn)
-	backupService := services.NewBackupService(dbConn)
 
 	// Services
 	settingsService := services.NewSettingsService(dbQueries, encryptionKey)
@@ -50,7 +49,6 @@ func SetupRoutes(ctx context.Context, app *fiber.App, dbConn *connection.DBConn,
 	webhookService.StartDelivery(ctx)
 	apiTokenService := services.NewAPITokenService(dbQueries)
 	preferenceHandler := handlers.NewPreferenceHandler(preferenceService)
-	backupHandler := handlers.NewBackupHandler(backupService)
 	reservationService := services.NewReservationService(dbQueries, reservationHistoryService, webhookService, realtimeService, notificationService)
 
 	spaceService := services.NewSpaceService(dbQueries)
@@ -170,10 +168,6 @@ func SetupRoutes(ctx context.Context, app *fiber.App, dbConn *connection.DBConn,
 	admin.Get("/settings", settingsHandler.GetSettings)
 	admin.Put("/settings", settingsHandler.UpdateSetting)
 	admin.Get("/audit-logs", auditHandler.GetAuditLogs)
-
-	// Backup & Restore (Admin Only)
-	admin.Get("/backup", backupHandler.CreateBackup)
-	admin.Post("/restore", backupHandler.RestoreBackup)
 
 	// Webhooks (Admin Only)
 	webhooks := api.Group("/webhooks", AdminMiddleware())

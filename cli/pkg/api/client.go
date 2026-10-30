@@ -1,12 +1,9 @@
 package api
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
-	"mime/multipart"
 	"net/http"
 	"net/url"
 	"os"
@@ -605,56 +602,4 @@ func (c *Client) UpdateWebhook(id string, req UpdateWebhookRequest) (*Webhook, e
 		return nil, fmt.Errorf("failed to unmarshal webhook: %w", err)
 	}
 	return &webhook, nil
-}
-
-// Backup Methods
-
-// CreateBackup downloads the backup JSON from the server.
-func (c *Client) CreateBackup() ([]byte, error) {
-	return c.request("GET", "/api/admin/backup", nil)
-}
-
-// RestoreBackup uploads a backup JSON file to the server.
-func (c *Client) RestoreBackup(data []byte) error {
-	body := &bytes.Buffer{}
-	writer := multipart.NewWriter(body)
-
-	part, err := writer.CreateFormFile("file", "backup.json")
-	if err != nil {
-		return fmt.Errorf("failed to create form file: %w", err)
-	}
-	if _, err := part.Write(data); err != nil {
-		return fmt.Errorf("failed to write backup data: %w", err)
-	}
-	if err := writer.Close(); err != nil {
-		return fmt.Errorf("failed to close writer: %w", err)
-	}
-
-	req, err := http.NewRequestWithContext(c.context(), "POST", c.BaseURL+"/api/admin/restore", body)
-	if err != nil {
-		return fmt.Errorf("failed to create request: %w", err)
-	}
-	req.Header.Set("Content-Type", writer.FormDataContentType())
-	if c.Token != "" {
-		req.Header.Set("Authorization", "Bearer "+c.Token)
-	}
-
-	resp, err := c.HttpClient.Do(req)
-	if err != nil {
-		return fmt.Errorf("request failed: %w", err)
-	}
-	defer resp.Body.Close()
-
-	respBody, err := io.ReadAll(io.LimitReader(resp.Body, maxResponseBytes+1))
-	if err != nil {
-		return err
-	}
-	if len(respBody) > maxResponseBytes {
-		return fmt.Errorf("response exceeds size limit")
-	}
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return &APIError{StatusCode: resp.StatusCode, Body: string(respBody)}
-	}
-
-	return nil
 }

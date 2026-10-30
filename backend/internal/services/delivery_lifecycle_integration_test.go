@@ -46,13 +46,8 @@ func TestDeliveryLifecycleSnapshotsRealDatabase(t *testing.T) {
 	queued, _ := seedRefreshAccount(t, pool)
 	_, err = insertDeliveryReservation(ctx, store, queued, resource)
 	require.NoError(t, err)
-	tx, err := pool.Begin(ctx)
+	_, err = pool.Exec(ctx, "UPDATE claimctl.reservations SET hard_end_time=clock_timestamp()-INTERVAL '1 second' WHERE id=$1", r.ID)
 	require.NoError(t, err)
-	_, err = tx.Exec(ctx, "SET LOCAL claimctl.restoring='on'")
-	require.NoError(t, err)
-	_, err = tx.Exec(ctx, "UPDATE claimctl.reservations SET lease_expires_at=clock_timestamp()-INTERVAL '1 second' WHERE id=$1", r.ID)
-	require.NoError(t, err)
-	require.NoError(t, tx.Commit(ctx))
 	var wg sync.WaitGroup
 	errs := make(chan error, 20)
 	for i := 0; i < 20; i++ {

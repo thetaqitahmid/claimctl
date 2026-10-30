@@ -46,11 +46,13 @@ scope isolate bundle keys from single-claim keys. Resource order is
 canonicalized before fingerprinting. Same-key retries return the full original
 snapshot, after verifying current access to every resource. A different
 fingerprint conflicts. Result snapshots commit with the claims and survive
-individual claim deletion until the actor is deleted. Keys are omitted from
-backup and cleared by restore; do not retry old keys across a restore.
+individual claim deletion until the actor is deleted. Full database backups
+include these keys; the offline [recovery procedure](BACKUP_RESTORE.md) clears
+them before a fresh deployment starts. Do not retry old keys across recovery.
 
-Backup preserves `lease_duration`, `lease_expires_at` and `hard_end_time`.
-Restored elapsed deadlines remain elapsed and are reclaimed normally.
+Native database backups preserve `lease_duration`, `lease_expires_at` and
+`hard_end_time`. Restored elapsed deadlines remain elapsed and are reclaimed
+normally.
 
 Migration23 also repairs queue history: its allowed `queue_position_changed`
 action needs32-character storage instead of the old20-character column, and

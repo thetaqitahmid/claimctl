@@ -10,8 +10,8 @@ type TokenOptions struct {
 var TokenScopes = map[string]bool{
 	"read": false, "reserve": false,
 	"resources:write": true, "health:write": true, "webhooks:write": true,
-	"secrets:write": true, "secrets:read": true, "backup:read": true,
-	"restore:write": true, "audit:read": true, "users:write": true,
+	"secrets:write": true, "secrets:read": true,
+	"audit:read": true, "users:write": true,
 	"users:read":   true,
 	"spaces:write": true, "groups:write": true, "settings:read": true,
 	"settings:write": true, "reservations:write": true, "metrics:read": true,

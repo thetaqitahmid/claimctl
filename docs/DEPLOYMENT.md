@@ -200,3 +200,16 @@ keyGeneration:
 _Note: This creates a ServiceAccount, Role, and RoleBinding scoped to the
 single generated Secret name so the Pod can create/manage it in its namespace.
 Prefer Option 1 when secrets are managed outside Helm._
+
+## Database backup and recovery
+
+Use PostgreSQL native backups, not application JSON exports. Follow
+[Backup and recovery](BACKUP_RESTORE.md) for `pg_dump`, `pg_restore`, offline
+runtime cleanup, and validation of a fresh claimctl deployment.
+
+Restore the full database before starting application replicas or migration
+jobs. Supply the original `APP_ENCRYPTION_KEY`, the same manifest and Secret
+values, and a compatible application image. A new instance reads existing
+accounts, resources, settings, and encrypted signing keys from the recovered
+database; no application import or seed script is required. Startup does not
+clear runtime state automatically, so complete offline cleanup first.

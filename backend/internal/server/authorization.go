@@ -16,10 +16,6 @@ func requiredTokenScope(path, method string) string {
 		return "browser-only"
 	case path == "/api/admin/metrics":
 		return "metrics:read"
-	case strings.HasPrefix(path, "/api/admin/backup"):
-		return "backup:read"
-	case strings.HasPrefix(path, "/api/admin/restore"):
-		return "restore:write"
 	case strings.HasPrefix(path, "/api/admin/audit-logs"):
 		return "audit:read"
 	case strings.HasPrefix(path, "/api/admin/settings"):

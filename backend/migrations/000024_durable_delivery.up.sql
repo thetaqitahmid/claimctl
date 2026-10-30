@@ -32,7 +32,6 @@ DECLARE
     snapshot claimctl.reservations;
 BEGIN
     snapshot := NEW;
-    IF current_setting('claimctl.restoring', true) = 'on' THEN RETURN NEW; END IF;
     IF TG_OP = 'INSERT' THEN
         SELECT * INTO snapshot FROM claimctl.reservations WHERE id = NEW.id;
         IF NOT FOUND THEN RETURN NULL; END IF;

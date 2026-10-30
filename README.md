@@ -78,7 +78,7 @@ database integration tests, deployment fixtures, and browser acceptance.
 | Team visibility | Web UI, live updates via SSE, maintenance mode |
 | Automation | CLI, API tokens, reservation event webhooks |
 | Access management | Local authentication, OIDC SSO, access groups |
-| Operations | Audit logs, database backup and restore, encrypted secrets |
+| Operations | Audit logs, encrypted secrets, PostgreSQL native recovery |
 | Notifications | Email, Slack, and Microsoft Teams dispatch support |
 | Health monitoring | Ping, HTTP, and TCP checks with retries |
 
@@ -220,7 +220,13 @@ suitable for your environment.
 
 See the [Deployment Guide](docs/DEPLOYMENT.md),
 [Authentication Guide](docs/AUTHENTICATION.md),
-[Encryption Guide](docs/ENCRYPTION.md), and [Security Policy](SECURITY.md).
+[Encryption Guide](docs/ENCRYPTION.md),
+[Backup and Recovery](docs/BACKUP_RESTORE.md), and
+[Security Policy](SECURITY.md).
+
+Backups use PostgreSQL tools, not an application JSON export. A fresh
+claimctl deployment can use a restored database with the original encryption
+key and deployment configuration after the documented offline cleanup.
 
 ## Documentation
 
@@ -234,6 +240,7 @@ See the [Deployment Guide](docs/DEPLOYMENT.md),
 | [Administration](docs/ADMINISTRATION.md) | Administrative operations |
 | [Deployment](docs/DEPLOYMENT.md) | Deployment configuration and Helm |
 | [Encryption](docs/ENCRYPTION.md) | Key configuration and encrypted storage |
+| [Recovery](docs/BACKUP_RESTORE.md) | Native backups and fresh deployment |
 
 ## Development and contributions
 

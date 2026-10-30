@@ -50,9 +50,10 @@ token is stored. The token itself is only shown to the user once upon creation.
 
 ### Secrets & Webhooks (Internal Note)
 
-While claimctl provides a "Secrets" management interface and "Webhook"
-headers, these are currently stored in **plain text** in the database. Use with
-caution in environments where database access is not strictly controlled.
+Named secret values and newly created webhook signing secrets are encrypted
+with `APP_ENCRYPTION_KEY`. Webhook URLs, headers, and templates may contain
+plaintext configuration values. Prefer named secret references for sensitive
+configuration and restrict database access.
 
 ## Security Best Practices
 
@@ -64,4 +65,7 @@ caution in environments where database access is not strictly controlled.
 3. **Database Access**: Restrict access to the PostgreSQL database to the
    claimctl backend service only.
 4. **Backup Security**: Ensure that database backups are stored in a secure,
-   encrypted location, as they contain the encrypted secrets.
+   encrypted location, as they contain credential hashes and encrypted secrets.
+
+For fresh deployment recovery, preserve the original key together with the
+manifests and Secret values. See [Backup and recovery](BACKUP_RESTORE.md).

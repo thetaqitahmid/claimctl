@@ -1,7 +1,6 @@
 import React, { useState } from 'react';
 import { useGetSettingsQuery, useUpdateSettingMutation, AppSetting } from '../store/api/settings';
 import { useAppSelector } from '../store/store';
-import BackupRestore from '../components/BackupRestore';
 import { useNotificationContext } from '../hooks/useNotification';
 
 const AdminSettings: React.FC = () => {
@@ -10,7 +9,7 @@ const AdminSettings: React.FC = () => {
     const [updateSetting] = useUpdateSettingMutation();
     const [editingKey, setEditingKey] = useState<string | null>(null);
     const [editValue, setEditValue] = useState('');
-    const [activeTab, setActiveTab] = useState<'auth' | 'notification' | 'backup'>('auth');
+    const [activeTab, setActiveTab] = useState<'auth' | 'notification'>('auth');
     const { showNotification } = useNotificationContext();
 
     if (authData.role !== 'admin') {
@@ -21,7 +20,7 @@ const AdminSettings: React.FC = () => {
         return <div className="p-8 text-center">Loading settings...</div>;
     }
 
-    const categories = ['auth', 'notification', 'backup'];
+    const categories = ['auth', 'notification'] as const;
 
     const filteredSettings = settings.filter(s => s.category === activeTab);
 
@@ -62,7 +61,7 @@ const AdminSettings: React.FC = () => {
                     {categories.map((category) => (
                         <button
                             key={category}
-                            onClick={() => setActiveTab(category as 'auth' | 'notification' | 'backup')}
+                            onClick={() => setActiveTab(category)}
                             className={`pb-3 px-4 text-sm font-medium transition-all duration-200 relative capitalize ${
                                 activeTab === category
                                     ? "text-cyan-400"
@@ -77,9 +76,6 @@ const AdminSettings: React.FC = () => {
                     ))}
                 </div>
 
-                {activeTab === 'backup' ? (
-                    <BackupRestore />
-                ) : (
                 <div className="glass-panel rounded-xl overflow-hidden border border-slate-700/50 animate-fade-in">
                     <ul className="divide-y divide-slate-700/50">
                         {filteredSettings.map((setting) => (
@@ -136,7 +132,6 @@ const AdminSettings: React.FC = () => {
                         )}
                     </ul>
                 </div>
-                )}
             </main>
         </div>
     );

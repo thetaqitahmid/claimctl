@@ -287,12 +287,12 @@ Use the `config` command to set persistent values:
 
 ---
 
-### Backup & Restore (Admin)
+### Database backup and recovery
 
-```bash
-./claimctl backup --output backup.json
-./claimctl restore --file backup.json
-```
+Database recovery is an offline operator task using PostgreSQL tools, not a
+claimctl CLI command. See [Backup and recovery](BACKUP_RESTORE.md) for native
+backups and recovery into a fresh deployment with the original encryption key
+and deployment configuration.
 
 ---
 

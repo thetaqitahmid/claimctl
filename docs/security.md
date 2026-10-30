@@ -88,10 +88,10 @@ scope. Supported scopes are:
 
 ```text
 resources:write       health:write        webhooks:write
-secrets:read          secrets:write       backup:read
-restore:write         audit:read          users:write
-spaces:write          groups:write        settings:read
-settings:write        reservations:write  users:read
+secrets:read          secrets:write       audit:read
+users:read            users:write         spaces:write
+groups:write          settings:read       settings:write
+reservations:write    metrics:read
 ```
 
 `webhooks:write` and `groups:write` include their administrative reads.
@@ -106,8 +106,8 @@ only its needed capabilities.
 `space_ids` restricts resource/space access further; it never grants membership.
 An empty list means all spaces otherwise accessible to the current account.
 Space-restricted tokens cannot access global admin, secret, webhook, user/group
-administration, or create new spaces. This prevents global operations such as
-backup from leaking resources outside the token's allowed spaces.
+administration, or create new spaces. This prevents global operations from
+leaking resources outside the token's allowed spaces.
 
 ## Bootstrap and refresh recovery
 
@@ -126,19 +126,19 @@ retains consumed tokens as replay evidence while the family remains live.
 Replay commits family revocation before returning an error. Password changes
 and refresh revocation are one transaction using the same lock ordering.
 
-## Backup contract
+## Backup and recovery
 
-Version `1` exports canonical PostgreSQL JSON, including UUIDs, UUID arrays,
-intervals, authentication fields, token scopes, and token space restrictions.
-Export errors fail the entire backup. Restore rejects unsupported versions,
-unknown fields or columns, and invalid token scopes or space IDs. Restore runs
-in one transaction and rolls back on any insert failure. UUID tables do not
-need SERIAL sequence resets. Backups contain credential hashes and encrypted
-secrets and must be handled as sensitive administrator-only material.
+Use full PostgreSQL native backups and the offline recovery procedure in
+[Backup and recovery](BACKUP_RESTORE.md). Application JSON backup endpoints,
+CLI commands, and their token scopes have been removed. Existing tokens with
+other scopes keep those capabilities; removed scopes grant no capability.
 
-Refresh sessions are not restored; users must authenticate again. Audit logs
-are omitted. Later durable delivery/state tables must explicitly reconcile
-backup and restore support before deployment.
+Dumps include credential hashes, encrypted secrets, audit logs, and runtime
+state. Preserve the original encryption key separately. Before starting a
+recovered deployment, run the documented runtime cleanup to discard refresh
+sessions, old coordination state, idempotency results, and delivery jobs.
+Access JWTs and retained API tokens are not automatically revoked by recovery.
+Review post-backup account changes and revocations before reopening traffic.
 
 ## Health-check egress
 

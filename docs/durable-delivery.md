@@ -71,15 +71,16 @@ or trigger duplicate webhook intent.
 
 ## Backup and restore
 
-Runtime outbox and worker lease tables are deliberately excluded from backups.
-Restore clears them in the same transaction as data import and suppresses
-reservation delivery triggers throughout import. Failed restore rolls back
-both runtime clearing and imported data. A successful restore does not replay
-historical reservations or restore live worker ownership.
+Full PostgreSQL backups include outbox and worker lease tables. The offline
+[recovery procedure](BACKUP_RESTORE.md) clears them explicitly after a full
+restore, before a fresh deployment starts. Native full restore installs
+triggers after loading data, so historical reservations do not generate new
+webhook jobs during import. Ordinary startup never clears durable jobs.
 
-Intentional restore therefore loses undelivered events. Quiesce all replicas
-and their workers before restore: fencing cannot recall a network request
-already in flight. Do not reuse pre-restore claim or bundle idempotency keys.
+Recovery cleanup intentionally loses undelivered events to avoid replaying
+side effects completed after the backup. Stop all replicas and workers before
+restore: fencing cannot recall a network request already in flight. Do not
+reuse pre-recovery claim or bundle idempotency keys.
 Migration 24 down removes runtime jobs and coordination, preserving reservation
 and history data and the corrected history behavior from migration 23. Up does
 not backfill historical webhook events. Back up business data before downgrade

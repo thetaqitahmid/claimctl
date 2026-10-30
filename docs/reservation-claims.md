@@ -79,10 +79,12 @@ explicit duration are different requests. Replay rechecks current resource
 access and returns the original snapshot, even after release or cancellation;
 it does not resurrect the reservation or emit another creation event.
 
-Claim idempotency records are omitted from backup/restore, like refresh
-sessions. Records live as long as their referenced reservation. Deletion
-cascades deletion of its keys. Clients must use a fresh random key per logical
-operation and must not reuse old keys beyond reservation retention.
+Full database backups include claim idempotency records and refresh sessions.
+The offline [recovery procedure](BACKUP_RESTORE.md) clears both before a fresh
+deployment starts. Normally records live as long as their referenced
+reservation, and deletion cascades deletion of its keys. Clients must use a
+fresh random key per logical operation and must not reuse old keys across
+recovery or beyond reservation retention.
 
 Legacy `POST /api/reservations` and `/api/reservations/timed` use the same
 policy, quota, atomic locking, scope checks, and idempotency enforcement.

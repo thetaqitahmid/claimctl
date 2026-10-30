@@ -32,6 +32,8 @@ The test helper requires a PostgreSQL cluster owned by the developer at
 `127.0.0.1:55432` or `127.0.0.1:55433`. It creates UUID-named databases,
 applies all migrations, and drops those databases after each test. The login
 must have permission to create databases. Never supply a production URL.
+Install `pg_dump`, `pg_restore`, and `psql` matching the test server's major
+version for the native database recovery regression.
 
 One option is a temporary local Docker container with no persistent volume:
 
@@ -66,7 +68,10 @@ results. Integration coverage includes:
 2. Atomic claims, idempotency, quotas, queue contention, bundles, and leases.
 3. Expired claims releasing quota and same-owner reacquisition before workers
    run, including lease, scheduled hold, and hard deadlines.
-4. Transactional delivery, retries, fencing, timeouts, restore, and recovery.
+4. Transactional delivery, retries, fencing, timeouts, and recovery.
+   Native `pg_dump`/`pg_restore` into an empty database, offline runtime cleanup,
+   and fresh server startup with recovered credentials, signing keys, encrypted
+   secrets, audit logs, token restrictions, and unchanged business data.
 5. Two-server shared state, realtime visibility, proxy origin handling, and
    unbuffered SSE.
 6. Populated upgrade and downgrade through migrations 21 to 25, preserving

@@ -33,9 +33,6 @@ DECLARE
     sid UUID;
     kind TEXT := 'resync';
 BEGIN
-    IF current_setting('claimctl.restoring', true) = 'on' THEN
-        RETURN NULL;
-    END IF;
     PERFORM pg_advisory_xact_lock(725025);
     IF TG_TABLE_NAME = 'api_tokens' AND TG_OP = 'UPDATE' THEN
         IF ROW(OLD.id, OLD.user_id, OLD.token_hash, OLD.scopes,

@@ -3,10 +3,10 @@
 ## Shared realtime invalidation
 
 Migration25 adds `claimctl.realtime_events`, `claimctl.shared_storage` and
-`claimctl.rate_limits`. These are runtime state, not backup export fields.
-Restore clears them in its transaction, suppresses import events and emits one
-payload-free `resync` after a successful import. Failed restore rolls back all
-clearing. Quiesce replicas before restore, as for durable webhook delivery.
+`claimctl.rate_limits`. Full PostgreSQL backups include this runtime state.
+The offline [recovery procedure](BACKUP_RESTORE.md) clears it after restore,
+before a fresh deployment starts. Stop all replicas and workers during
+recovery. New client subscriptions refetch state through their initial resync.
 Migration25 down discards runtime state but preserves business/history data.
 
 Every resource/reservation mutation emits a scoped invalidation in the SAME
@@ -56,8 +56,9 @@ responsibility; closing the SSE stream does not itself erase Redux cache.
 A PostgreSQL transaction advisory lock,725025, is acquired BEFORE any SSE ID is
 allocated. All emitting table statements and log inserts acquire that same
 lock before statement execution; capture triggers acquire it again before
-inserting. `SQLStore.ExecTx` acquires it before business row locks. Backup
-restore acquires it before truncation. The sequence therefore cannot expose a
+inserting. `SQLStore.ExecTx` acquires it before business row locks. Offline
+recovery cleanup acquires it before truncating runtime state. The sequence
+therefore cannot expose a
 larger committed ID while a lower-ID writer remains uncommitted. Rollback may
 leave sequence gaps; those gaps are not lost committed events.
 
@@ -67,9 +68,9 @@ throughput across replicas. Lock waits fail after5s instead of waiting forever.
 No network operation runs while this SSE lock is held. Transactions outside
 `SQLStore.ExecTx` that lock business rows BEFORE writing emitting tables MUST
 first acquire `pg_advisory_xact_lock(725025)`. Do not bypass this lock order
-with raw administrative writers. The application's only raw mutating
-transaction, backup restore, follows that order. Read-only queries are not
-serialized.
+with raw administrative writers. Offline recovery cleanup follows that order
+as well, but still requires all replicas to be stopped. Read-only queries are
+not serialized.
 
 ## CSRF and distributed counters
 

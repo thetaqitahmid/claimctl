@@ -28,7 +28,8 @@ unencrypted and should only be used on a trusted network. `--ca-cert` adds a
 trusted PEM CA without disabling certificate or hostname verification.
 Redirects are rejected rather than following them with credentials.
 `--request-timeout` defaults to `30s` per HTTP attempt and must be positive.
-Responses are bounded to 64 MiB, including backup downloads.
+API responses are bounded to 64 MiB. Database backups use PostgreSQL tools
+outside the application CLI; see [Backup and recovery](BACKUP_RESTORE.md).
 
 Reads and claim/bundle creation with an idempotency key can retry transport
 failures, HTTP 429 and server errors. Other mutations are never automatically

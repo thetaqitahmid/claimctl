@@ -243,6 +243,7 @@ const ResourceList = () => {
           "error",
           `Error cancelling reservations: ${err?.data?.error || err.message || "Unknown error"}`,
         );
+        throw e;
       }
     }
   };
@@ -280,6 +281,7 @@ const ResourceList = () => {
         "error",
         `Error toggling maintenance: ${err?.data?.error || err.message || "Unknown error"}`,
       );
+      throw e;
     }
   };
 

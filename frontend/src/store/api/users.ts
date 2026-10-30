@@ -10,6 +10,7 @@ export const userApiSlice = createApi({
     return {
       getUsers: builder.query<User[], void>({
         query: () => "/users",
+        transformResponse: (response: User[] | null) => response || [],
         providesTags: ["User"],
       }),
       getUserById: builder.query<User, string>({
@@ -38,7 +39,10 @@ export const userApiSlice = createApi({
         }),
         invalidatesTags: ["User"],
       }),
-      changePassword: builder.mutation<void, { current_password: string; new_password: string }>({
+      changePassword: builder.mutation<
+        void,
+        { current_password: string; new_password: string }
+      >({
         query: (body) => ({
           url: "/user/password",
           method: "POST",

@@ -1,193 +1,289 @@
-import React, { useState } from "react";
+import { useState } from "react";
+import { Link } from "react-router-dom";
+import { Dialog, DialogPanel, DialogTitle } from "@headlessui/react";
+import { Plus } from "lucide-react";
 import {
   useGetSpacesQuery,
   useCreateSpaceMutation,
   useDeleteSpaceMutation,
 } from "../store/api/spaces";
 import { Space } from "../types";
-import { Trash2, Plus, Box, Shield } from "lucide-react";
-import { SpacePermissionsModal } from "./SpacePermissionsModal";
+import ConfirmationModal from "./ConfirmationModal";
+import { useNotificationContext } from "../hooks/useNotification";
 
-const SpaceManagement: React.FC = () => {
-  const { data: spaces, isLoading, error } = useGetSpacesQuery();
-  const [createSpace] = useCreateSpaceMutation();
+const SpaceManagement = () => {
+  const { data: spaces = [], isLoading, error, refetch } = useGetSpacesQuery();
+  const [createSpace, { isLoading: creating }] = useCreateSpaceMutation();
   const [deleteSpace] = useDeleteSpaceMutation();
-  const [newSpaceName, setNewSpaceName] = useState("");
-  const [newSpaceDescription, setNewSpaceDescription] = useState("");
+  const [showCreate, setShowCreate] = useState(false);
+  const [name, setName] = useState("");
+  const [description, setDescription] = useState("");
+  const [createError, setCreateError] = useState("");
+  const [spaceToDelete, setSpaceToDelete] = useState<Space | null>(null);
+  const [search, setSearch] = useState("");
+  const [page, setPage] = useState(0);
+  const { showNotification } = useNotificationContext();
+  const filtered = spaces.filter((space) =>
+    `${space.name} ${space.description}`
+      .toLowerCase()
+      .includes(search.toLowerCase()),
+  );
+  const pageCount = Math.max(1, Math.ceil(filtered.length / 10));
+  const currentPage = Math.min(page, pageCount - 1);
 
-  const [selectedSpace, setSelectedSpace] = useState<Space | null>(null);
-  const [isPermissionsModalOpen, setIsPermissionsModalOpen] = useState(false);
-
-  const handleCreateSpace = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!newSpaceName) return;
+  const handleCreate = async (event: React.FormEvent) => {
+    event.preventDefault();
+    if (!name.trim()) {
+      setCreateError("Enter a space name.");
+      return;
+    }
+    setCreateError("");
     try {
       await createSpace({
-        name: newSpaceName,
-        description: newSpaceDescription,
+        name: name.trim(),
+        description: description.trim(),
       }).unwrap();
-      setNewSpaceName("");
-      setNewSpaceDescription("");
+      setShowCreate(false);
+      setName("");
+      setDescription("");
+      showNotification(
+        "success",
+        "Space created. Open Access to grant access to users or groups.",
+      );
     } catch (err) {
-      console.error("Failed to create space:", err);
+      setCreateError(
+        (err as { data?: { error?: string } })?.data?.error ||
+          "Could not create space. Your entries have been kept. Please try again.",
+      );
     }
-  };
-
-  const handleDeleteSpace = async (id: string) => {
-    if (confirm("Are you sure? All resources in this space will be deleted.")) {
-      try {
-        await deleteSpace(id).unwrap();
-      } catch (err) {
-        console.error("Failed to delete space:", err);
-      }
-    }
-  };
-
-  const handlePermissions = (space: Space) => {
-    setSelectedSpace(space);
-    setIsPermissionsModalOpen(true);
   };
 
   return (
-    <div className="space-y-8 mb-12">
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+    <div className="space-y-6">
+      <header className="flex flex-wrap items-center justify-between gap-4">
         <div>
-          <h2 className="text-3xl font-bold text-white tracking-tight flex items-center gap-3">
-            <Box className="w-8 h-8 text-brand-queued" />
-            Spaces
-          </h2>
-          <p className="text-slate-400 mt-1">Manage organizational units and resource boundaries</p>
+          <p className="text-sm text-slate-400 mb-2">
+            Administration / People and access
+          </p>
+          <h1 className="text-3xl font-semibold text-white">Spaces</h1>
+          <p className="text-slate-400 mt-2">
+            Organize resources and control which people and groups can access
+            them.
+          </p>
         </div>
-      </div>
-
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-        {/* Create Form */}
-        <div className="lg:col-span-1">
-          <div className="glass-panel p-6 rounded-xl border border-slate-800/50">
-            <h3 className="text-lg font-semibold text-white mb-4 flex items-center gap-2">
-              <Plus className="w-4 h-4 text-brand-queued" />
-              New Space
-            </h3>
-            <form onSubmit={handleCreateSpace} className="space-y-4">
-              <div>
-                <label className="block text-xs font-medium text-slate-400 uppercase tracking-wider mb-1.5">
-                  Space Name
-                </label>
-                <input
-                  type="text"
-                  placeholder="e.g. Engineering, Marketing"
-                  value={newSpaceName}
-                  onChange={(e) => setNewSpaceName(e.target.value)}
-                  className="w-full rounded-lg bg-slate-950/50 border border-slate-800 px-4 py-2.5 text-sm text-slate-200 focus:outline-none focus:border-brand-queued transition-colors"
-                  required
-                />
-              </div>
-              <div>
-                <label className="block text-xs font-medium text-slate-400 uppercase tracking-wider mb-1.5">
-                  Description
-                </label>
-                <textarea
-                  placeholder="Optional details..."
-                  value={newSpaceDescription}
-                  onChange={(e) => setNewSpaceDescription(e.target.value)}
-                  className="w-full rounded-lg bg-slate-950/50 border border-slate-800 px-4 py-2.5 text-sm text-slate-200 focus:outline-none focus:border-brand-queued transition-colors h-24 resize-none"
-                />
-              </div>
-              <button
-                type="submit"
-                className="btn-primary w-full py-3"
-              >
-                Create Space
-              </button>
-            </form>
-          </div>
+        <button
+          className="btn-primary"
+          onClick={() => {
+            setCreateError("");
+            setShowCreate(true);
+          }}
+        >
+          <Plus size={18} />
+          Create space
+        </button>
+      </header>
+      <p className="admin-panel p-4 text-sm text-slate-300">
+        The Default Space is public. Other spaces use explicit user and group
+        grants. Administrators retain access.
+      </p>
+      <label className="block max-w-lg text-sm text-slate-300">
+        Search spaces
+        <input
+          className="admin-input mt-2"
+          type="search"
+          value={search}
+          onChange={(e) => {
+            setSearch(e.target.value);
+            setPage(0);
+          }}
+          placeholder="Name or description"
+        />
+      </label>
+      {isLoading ? (
+        <p role="status">Loading spaces…</p>
+      ) : error ? (
+        <div role="alert" className="admin-panel p-6">
+          <p>Could not load spaces.</p>
+          <button className="btn-ghost mt-3" onClick={() => refetch()}>
+            Retry
+          </button>
         </div>
-
-        {/* Spaces List */}
-        <div className="lg:col-span-2">
-          <div className="glass-panel rounded-xl overflow-hidden border border-slate-800/50 shadow-2xl">
-            <div className="overflow-x-auto">
-              <table className="w-full text-left text-sm">
-                <thead>
-                  <tr className="border-b border-slate-800/50 bg-slate-900/50">
-                    <th className="px-6 py-4 font-semibold text-slate-300 uppercase tracking-wider text-[11px]">Name</th>
-                    <th className="px-6 py-4 font-semibold text-slate-300 uppercase tracking-wider text-[11px]">Description</th>
-                    <th className="px-6 py-4 font-semibold text-slate-300 uppercase tracking-wider text-[11px] text-right">Actions</th>
+      ) : spaces.length === 0 ? (
+        <div className="admin-panel p-8">
+          <h2 className="text-lg text-white">No spaces yet</h2>
+          <p className="mt-2 mb-4">Create a space to organize resources.</p>
+          <button className="btn-primary" onClick={() => setShowCreate(true)}>
+            Create first space
+          </button>
+        </div>
+      ) : (
+        <>
+          <div className="admin-panel overflow-x-auto">
+            <table className="w-full text-sm text-left">
+              <thead className="bg-slate-800">
+                <tr>
+                  <th className="p-4" scope="col">
+                    Name
+                  </th>
+                  <th className="p-4" scope="col">
+                    Description
+                  </th>
+                  <th className="p-4" scope="col">
+                    Access
+                  </th>
+                  <th className="p-4" scope="col">
+                    Actions
+                  </th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-800">
+                {filtered.length === 0 ? (
+                  <tr>
+                    <td colSpan={4} className="p-8 text-center">
+                      No spaces match your search.
+                    </td>
                   </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-800/50 text-slate-400">
-                  {isLoading ? (
-                    <tr>
-                      <td colSpan={3} className="px-6 py-12 text-center">
-                        <div className="flex flex-col items-center gap-2">
-                          <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-brand-queued"></div>
-                          <span className="text-slate-500 italic">Loading spaces...</span>
-                        </div>
-                      </td>
-                    </tr>
-                  ) : error ? (
-                    <tr>
-                      <td colSpan={3} className="px-6 py-12 text-center text-brand-busy italic">
-                        Error loading spaces.
-                      </td>
-                    </tr>
-                  ) : spaces && spaces.length > 0 ? (
-                    spaces.map((space: Space) => (
-                      <tr key={space.id} className="group hover:bg-white/[0.02] transition-colors">
-                        <td className="px-6 py-4 whitespace-nowrap align-middle">
-                          <span className="font-semibold text-white">{space.name}</span>
+                ) : (
+                  filtered
+                    .slice(currentPage * 10, (currentPage + 1) * 10)
+                    .map((space) => (
+                      <tr key={space.id}>
+                        <td className="p-4 font-medium text-white">
+                          {space.name}
                         </td>
-                        <td className="px-6 py-4 align-middle">
-                          <span className="text-slate-400 line-clamp-1">{space.description || "—"}</span>
+                        <td className="p-4 text-slate-300">
+                          {space.description || "No description"}
                         </td>
-                        <td className="px-6 py-4 whitespace-nowrap align-middle text-right">
-                          <div className="flex items-center justify-end gap-2">
-                            {space.name !== "Default Space" ? (
-                              <>
-                                <button
-                                  onClick={() => handlePermissions(space)}
-                                  className="p-2 rounded-lg bg-cyan-500/10 text-cyan-400 hover:bg-cyan-500/20 border border-cyan-500/20 transition-all shadow-sm"
-                                  title="Manage Permissions"
-                                >
-                                  <Shield className="w-4 h-4" />
-                                </button>
-                                <button
-                                  onClick={() => handleDeleteSpace(space.id)}
-                                  className="p-2 rounded-lg bg-brand-busy/10 text-brand-busy hover:bg-brand-busy/20 border border-brand-busy/20 transition-all shadow-sm"
-                                  title="Delete Space"
-                                >
-                                  <Trash2 className="w-4 h-4" />
-                                </button>
-                              </>
-                            ) : (
-                              <span className="text-xs font-medium text-slate-600 bg-slate-800/40 px-2 py-1 rounded border border-slate-700/50 uppercase tracking-tighter">
-                                Public
-                              </span>
+                        <td className="p-4">
+                          {space.name === "Default Space"
+                            ? "Public"
+                            : "Restricted"}
+                        </td>
+                        <td className="p-4">
+                          <div className="flex flex-wrap gap-2">
+                            <Link
+                              className="btn-ghost"
+                              aria-label={`Manage access to ${space.name}`}
+                              to={`/admin/spaces/${space.id}`}
+                            >
+                              Access
+                            </Link>
+                            {space.name !== "Default Space" && (
+                              <button
+                                className="btn-ghost text-red-300"
+                                aria-label={`Delete ${space.name}`}
+                                onClick={() => setSpaceToDelete(space)}
+                              >
+                                Delete
+                              </button>
                             )}
                           </div>
                         </td>
                       </tr>
                     ))
-                  ) : (
-                    <tr>
-                      <td colSpan={3} className="px-6 py-12 text-center text-slate-500 italic">
-                        No spaces found.
-                      </td>
-                    </tr>
-                  )}
-                </tbody>
-              </table>
-            </div>
+                )}
+              </tbody>
+            </table>
           </div>
+          <nav
+            aria-label="Space pagination"
+            className="flex flex-wrap items-center gap-3 text-sm"
+          >
+            <p className="mr-auto">
+              {filtered.length} spaces · Page {currentPage + 1} of {pageCount}
+            </p>
+            <button
+              className="btn-ghost"
+              disabled={currentPage === 0}
+              onClick={() => setPage(currentPage - 1)}
+            >
+              Previous
+            </button>
+            <button
+              className="btn-ghost"
+              disabled={currentPage === pageCount - 1}
+              onClick={() => setPage(currentPage + 1)}
+            >
+              Next
+            </button>
+          </nav>
+        </>
+      )}
+      <Dialog
+        open={showCreate}
+        onClose={() => {
+          if (!creating) setShowCreate(false);
+        }}
+        className="fixed inset-0 z-50"
+      >
+        <div className="fixed inset-0 bg-slate-950/80" aria-hidden="true" />
+        <div className="fixed inset-0 flex items-center justify-center p-4">
+          <DialogPanel className="admin-panel p-6 w-full max-w-lg">
+            <DialogTitle className="text-xl font-semibold text-white">
+              Create space
+            </DialogTitle>
+            <form className="space-y-5 mt-5" onSubmit={handleCreate}>
+              <label className="block text-sm">
+                Space name
+                <input
+                  autoFocus
+                  className="admin-input mt-2"
+                  value={name}
+                  onChange={(e) => setName(e.target.value)}
+                  required
+                  disabled={creating}
+                />
+              </label>
+              <label className="block text-sm">
+                Description (optional)
+                <textarea
+                  className="admin-input mt-2"
+                  value={description}
+                  onChange={(e) => setDescription(e.target.value)}
+                  rows={3}
+                  disabled={creating}
+                />
+              </label>
+              {createError && (
+                <p role="alert" className="text-red-300">
+                  {createError}
+                </p>
+              )}
+              <div className="flex justify-end gap-3">
+                <button
+                  type="button"
+                  className="btn-ghost"
+                  disabled={creating}
+                  onClick={() => setShowCreate(false)}
+                >
+                  Cancel
+                </button>
+                <button className="btn-primary" disabled={creating}>
+                  {creating ? "Creating…" : "Create space"}
+                </button>
+              </div>
+            </form>
+          </DialogPanel>
         </div>
-      </div>
-
-      <div className="h-[1px] w-full bg-slate-800/50 my-12 shadow-[0_0_15px_rgba(0,0,0,0.5)]"></div>
-
-      <SpacePermissionsModal
-        isOpen={isPermissionsModalOpen}
-        onClose={() => setIsPermissionsModalOpen(false)}
-        space={selectedSpace}
+      </Dialog>
+      <ConfirmationModal
+        isOpen={Boolean(spaceToDelete)}
+        onClose={() => setSpaceToDelete(null)}
+        title="Delete space"
+        message={
+          <>
+            Delete <strong>{spaceToDelete?.name}</strong>? All resources in this
+            space will also be deleted. This cannot be undone.
+          </>
+        }
+        confirmText="Delete space"
+        isDestructive
+        onConfirm={async () => {
+          if (spaceToDelete) {
+            await deleteSpace(spaceToDelete.id).unwrap();
+            showNotification("success", "Space deleted");
+          }
+        }}
       />
     </div>
   );

@@ -10,6 +10,7 @@ export const groupsApiSlice = createApi({
     return {
       getGroups: builder.query<UserGroup[], void>({
         query: () => "/groups",
+        transformResponse: (response: UserGroup[] | null) => response || [],
         providesTags: ["Group"],
       }),
       getGroup: builder.query<UserGroup, string>({
@@ -24,7 +25,10 @@ export const groupsApiSlice = createApi({
         }),
         invalidatesTags: ["Group"],
       }),
-      updateGroup: builder.mutation<UserGroup, Partial<UserGroup> & { id: string }>({
+      updateGroup: builder.mutation<
+        UserGroup,
+        Partial<UserGroup> & { id: string }
+      >({
         query: ({ id, ...patch }) => ({
           url: `/groups/${id}`,
           method: "PATCH",
@@ -42,9 +46,13 @@ export const groupsApiSlice = createApi({
       // Members
       getGroupMembers: builder.query<GroupMember[], string>({
         query: (groupId) => `/groups/${groupId}/members`,
+        transformResponse: (response: GroupMember[] | null) => response || [],
         providesTags: ["GroupMember"],
       }),
-      addUserToGroup: builder.mutation<void, { groupId: string; userId: string }>({
+      addUserToGroup: builder.mutation<
+        void,
+        { groupId: string; userId: string }
+      >({
         query: ({ groupId, userId }) => ({
           url: `/groups/${groupId}/members`,
           method: "POST",
@@ -52,7 +60,10 @@ export const groupsApiSlice = createApi({
         }),
         invalidatesTags: ["GroupMember"],
       }),
-      removeUserFromGroup: builder.mutation<void, { groupId: string; userId: string }>({
+      removeUserFromGroup: builder.mutation<
+        void,
+        { groupId: string; userId: string }
+      >({
         query: ({ groupId, userId }) => ({
           url: `/groups/${groupId}/members/${userId}`,
           method: "DELETE",

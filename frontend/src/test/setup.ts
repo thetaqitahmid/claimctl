@@ -1,6 +1,15 @@
 import "@testing-library/jest-dom";
 import { vi } from "vitest";
 
+vi.stubGlobal(
+  "ResizeObserver",
+  class {
+    observe = vi.fn();
+    unobserve = vi.fn();
+    disconnect = vi.fn();
+  },
+);
+
 // Mock window.matchMedia for components that use media queries
 Object.defineProperty(window, "matchMedia", {
   writable: true,

@@ -1,140 +1,366 @@
-import React, { useState } from 'react';
-import { useGetSettingsQuery, useUpdateSettingMutation, AppSetting } from '../store/api/settings';
-import { useAppSelector } from '../store/store';
-import { useNotificationContext } from '../hooks/useNotification';
+import { useState } from "react";
+import { Navigate, useParams } from "react-router-dom";
+import {
+  useGetSettingsQuery,
+  useUpdateSettingMutation,
+  AppSetting,
+} from "../store/api/settings";
+import UnsavedChangesGuard from "../components/ui/UnsavedChangesGuard";
 
-const AdminSettings: React.FC = () => {
-    const authData = useAppSelector((state) => state.authSlice);
-    const { data: settings = [], isLoading, refetch } = useGetSettingsQuery();
-    const [updateSetting] = useUpdateSettingMutation();
-    const [editingKey, setEditingKey] = useState<string | null>(null);
-    const [editValue, setEditValue] = useState('');
-    const [activeTab, setActiveTab] = useState<'auth' | 'notification'>('auth');
-    const { showNotification } = useNotificationContext();
+const labels: Record<string, string> = {
+  oidc_issuer: "Issuer URL",
+  oidc_client_id: "Client ID",
+  oidc_client_secret: "Client secret",
+  oidc_redirect_url: "Redirect URL",
+  oidc_scopes: "Scopes",
+  oidc_admin_group: "Administrator group",
+  oidc_groups_claim: "Groups claim",
+  smtp_host: "SMTP host",
+  smtp_port: "SMTP port",
+  smtp_user: "SMTP username",
+  smtp_pass: "SMTP password",
+  smtp_from: "Sender email address",
+  slack_bot_token: "Slack bot token",
+  jwt_private_key: "JWT private key",
+  jwt_public_key: "JWT public key",
+};
 
-    if (authData.role !== 'admin') {
-        return <div className="p-8 text-center text-red-500">Access Denied</div>;
+const SettingsForm = ({
+  settings,
+  title,
+  description,
+}: {
+  settings: AppSetting[];
+  title: string;
+  description: string;
+}) => {
+  const [saved, setSaved] = useState(() =>
+    Object.fromEntries(
+      settings.map((s) => [s.key, s.is_secret ? "" : s.value]),
+    ),
+  );
+  const [values, setValues] = useState(saved);
+  const [replacing, setReplacing] = useState<Record<string, boolean>>({});
+  const [errors, setErrors] = useState<Record<string, string>>({});
+  const [status, setStatus] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [configured, setConfigured] = useState(() =>
+    Object.fromEntries(settings.map((s) => [s.key, Boolean(s.value)])),
+  );
+  const [updateSetting] = useUpdateSettingMutation();
+  const changed = settings.filter((s) => values[s.key] !== saved[s.key]);
+
+  const discard = () => {
+    setValues(saved);
+    setReplacing({});
+    setErrors({});
+    setStatus("");
+  };
+
+  const save = async (event: React.FormEvent) => {
+    event.preventDefault();
+    setSaving(true);
+    setErrors({});
+    setStatus("");
+    const failures: Record<string, string> = {};
+    for (const setting of changed) {
+      try {
+        await updateSetting({
+          ...setting,
+          value: values[setting.key],
+        }).unwrap();
+        const next = setting.is_secret ? "" : values[setting.key];
+        setSaved((previous) => ({ ...previous, [setting.key]: next }));
+        setValues((previous) => ({ ...previous, [setting.key]: next }));
+        setConfigured((previous) => ({
+          ...previous,
+          [setting.key]: Boolean(values[setting.key]),
+        }));
+        setReplacing((previous) => ({ ...previous, [setting.key]: false }));
+      } catch (error) {
+        failures[setting.key] =
+          (error as { data?: { error?: string } })?.data?.error ||
+          "Could not save this setting. Try again.";
+      }
     }
-
-    if (isLoading) {
-        return <div className="p-8 text-center">Loading settings...</div>;
-    }
-
-    const categories = ['auth', 'notification'] as const;
-
-    const filteredSettings = settings.filter(s => s.category === activeTab);
-
-    const handleEdit = (setting: AppSetting) => {
-        setEditingKey(setting.key);
-        setEditValue(setting.is_secret ? '' : setting.value); // Don't show masked value
-    };
-
-    const handleSave = async (setting: AppSetting) => {
-        try {
-            await updateSetting({ ...setting, value: editValue }).unwrap();
-            setEditingKey(null);
-            setEditValue('');
-            refetch();
-            showNotification('success', 'Setting updated successfully');
-        } catch (err) {
-            const error = err as { data?: { error?: string }; message?: string };
-            console.error("Failed to update setting", error);
-            showNotification('error', `Failed to update setting: ${error?.data?.error || error.message || 'Unknown error'}`);
-        }
-    };
-
-    const handleCancel = () => {
-        setEditingKey(null);
-        setEditValue('');
-    };
-
-    return (
-        <div className="min-h-screen flex flex-col font-sans selection:bg-cyan-500/30">
-            <main className="flex-grow container mx-auto px-4 py-8 max-w-7xl">
-                <div className="glass-panel p-8 rounded-2xl mb-8 animate-fade-in-up">
-                    <h1 className="text-3xl font-light text-white mb-2">System Settings</h1>
-                    <p className="text-slate-400 text-sm">Manage global application configurations</p>
-                </div>
-
-                {/* Tabs */}
-                <div className="flex gap-4 mb-6 border-b border-slate-700/50 pb-1">
-                    {categories.map((category) => (
-                        <button
-                            key={category}
-                            onClick={() => setActiveTab(category)}
-                            className={`pb-3 px-4 text-sm font-medium transition-all duration-200 relative capitalize ${
-                                activeTab === category
-                                    ? "text-cyan-400"
-                                    : "text-slate-400 hover:text-slate-200"
-                            }`}
-                        >
-                            {category}
-                            {activeTab === category && (
-                                <span className="absolute bottom-[-1px] left-0 w-full h-0.5 bg-cyan-400 rounded-full" />
-                            )}
-                        </button>
-                    ))}
-                </div>
-
-                <div className="glass-panel rounded-xl overflow-hidden border border-slate-700/50 animate-fade-in">
-                    <ul className="divide-y divide-slate-700/50">
-                        {filteredSettings.map((setting) => (
-                            <li key={setting.key} className="px-6 py-6 hover:bg-slate-800/30 transition-colors">
-                                <div className="flex items-center justify-between">
-                                    <div className="flex-1 min-w-0 pr-8">
-                                        <h4 className="text-lg font-medium text-white truncate">{setting.key}</h4>
-                                        <p className="text-sm text-slate-400 mt-1">{setting.description}</p>
-                                    </div>
-                                    <div className="flex-shrink-0 max-w-[60%]">
-                                        {editingKey === setting.key ? (
-                                            <div className="flex items-center gap-3 justify-end">
-                                                <input
-                                                    type={setting.is_secret ? "password" : "text"}
-                                                    value={editValue}
-                                                    onChange={(e) => setEditValue(e.target.value)}
-                                                    className="bg-slate-800/50 border border-slate-700 rounded-lg px-4 py-2 text-white focus:outline-none focus:border-cyan-500 transition-colors sm:text-sm w-full max-w-xs"
-                                                    placeholder={setting.is_secret ? "Enter new secret" : "Value"}
-                                                />
-                                                <button
-                                                    onClick={() => handleSave(setting)}
-                                                    className="bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 border border-emerald-500/20 px-4 py-2 rounded-lg text-sm font-medium transition-colors shrink-0"
-                                                >
-                                                    Save
-                                                </button>
-                                                <button
-                                                    onClick={handleCancel}
-                                                    className="text-slate-400 hover:text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors shrink-0"
-                                                >
-                                                    Cancel
-                                                </button>
-                                            </div>
-                                        ) : (
-                                            <div className="flex items-center gap-6 justify-end">
-                                                <span className={`text-sm break-all ${setting.value ? 'text-slate-200' : 'text-slate-500 italic'}`}>
-                                                    {setting.is_secret ? (setting.value ? '••••••••' : 'Not Set') : (setting.value || 'Not Set')}
-                                                </span>
-                                                <button
-                                                    onClick={() => handleEdit(setting)}
-                                                    className="text-cyan-400 hover:text-cyan-300 font-medium text-sm transition-colors shrink-0"
-                                                >
-                                                    Edit
-                                                </button>
-                                            </div>
-                                        )}
-                                    </div>
-                                </div>
-                            </li>
-                        ))}
-                        {filteredSettings.length === 0 && (
-                            <li className="px-6 py-12 text-center text-slate-500 italic">
-                                No settings found in this category.
-                            </li>
-                        )}
-                    </ul>
-                </div>
-            </main>
-        </div>
+    setErrors(failures);
+    setStatus(
+      Object.keys(failures).length
+        ? "Some changes could not be saved. Successful changes were saved; review the fields below and retry the remaining changes."
+        : "Changes saved successfully.",
     );
+    setSaving(false);
+  };
+
+  const groups =
+    title === "Authentication"
+      ? [
+          {
+            title: "Single sign on (OpenID Connect)",
+            keys: settings.filter(
+              (s) =>
+                s.key.startsWith("oidc_") &&
+                ![
+                  "oidc_scopes",
+                  "oidc_admin_group",
+                  "oidc_groups_claim",
+                ].includes(s.key),
+            ),
+            advanced: false,
+          },
+          {
+            title: "Advanced authentication options",
+            keys: settings.filter(
+              (s) =>
+                !s.key.startsWith("oidc_") ||
+                [
+                  "oidc_scopes",
+                  "oidc_admin_group",
+                  "oidc_groups_claim",
+                ].includes(s.key),
+            ),
+            advanced: true,
+          },
+        ]
+      : [
+          {
+            title: "Email delivery",
+            keys: settings.filter((s) => s.key.startsWith("smtp_")),
+            advanced: false,
+          },
+          {
+            title: "Other notification integrations",
+            keys: settings.filter((s) => !s.key.startsWith("smtp_")),
+            advanced: false,
+          },
+        ];
+
+  const renderField = (setting: AppSetting) => {
+    const id = `setting-${setting.key}`;
+    const label = labels[setting.key] || setting.key.replace(/_/g, " ");
+    const secret = setting.is_secret;
+    const multiline = setting.key.startsWith("jwt_");
+    const type = secret
+      ? "password"
+      : setting.key === "smtp_port"
+        ? "number"
+        : setting.key === "smtp_from"
+          ? "email"
+          : setting.key.endsWith("_url") || setting.key === "oidc_issuer"
+            ? "url"
+            : "text";
+    const props = {
+      id,
+      value: values[setting.key] || "",
+      className: "admin-input",
+      disabled: saving,
+      onChange: (
+        event: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>,
+      ) => {
+        setValues((previous) => ({
+          ...previous,
+          [setting.key]: event.target.value,
+        }));
+        setStatus("");
+      },
+      "aria-describedby": `${id}-help${errors[setting.key] ? ` ${id}-error` : ""}`,
+      "aria-invalid": Boolean(errors[setting.key]),
+    };
+    return (
+      <div key={setting.key} className="max-w-2xl space-y-2">
+        <label
+          htmlFor={id}
+          className="block text-sm font-medium text-slate-100"
+        >
+          {label}
+        </label>
+        <p id={`${id}-help`} className="text-sm text-slate-400">
+          {setting.key === "oidc_redirect_url"
+            ? "Optional. When empty, uses the application's base URL followed by /api/auth/oidc/callback."
+            : setting.description}
+        </p>
+        {secret && (
+          <div className="flex items-center gap-4 text-sm">
+            <span className="text-slate-300">
+              {configured[setting.key] ? "Configured" : "Not configured"}
+            </span>
+            <button
+              type="button"
+              className="text-cyan-300 underline"
+              disabled={saving}
+              onClick={() => {
+                setReplacing((previous) => ({
+                  ...previous,
+                  [setting.key]: !previous[setting.key],
+                }));
+                setValues((previous) => ({ ...previous, [setting.key]: "" }));
+              }}
+            >
+              {replacing[setting.key]
+                ? "Cancel replacement"
+                : configured[setting.key]
+                  ? "Replace secret"
+                  : "Set secret"}
+            </button>
+          </div>
+        )}
+        {(!secret || replacing[setting.key]) &&
+          (multiline ? (
+            <textarea
+              {...props}
+              rows={6}
+              autoComplete="off"
+              required={secret}
+            />
+          ) : (
+            <input
+              {...props}
+              type={type}
+              min={type === "number" ? 1 : undefined}
+              max={type === "number" ? 65535 : undefined}
+              step={type === "number" ? 1 : undefined}
+              autoComplete={secret ? "new-password" : "off"}
+              required={secret}
+            />
+          ))}
+        {errors[setting.key] && (
+          <p id={`${id}-error`} className="text-sm text-red-300" role="alert">
+            {errors[setting.key]}
+          </p>
+        )}
+      </div>
+    );
+  };
+
+  return (
+    <form onSubmit={save} className="space-y-6">
+      <UnsavedChangesGuard
+        dirty={changed.length > 0 || saving}
+        pending={saving}
+      />
+      <header>
+        <p className="text-sm text-slate-400 mb-2">
+          Administration / System Settings
+        </p>
+        <h1 className="text-3xl font-semibold text-white">{title}</h1>
+        <p className="text-slate-400 mt-2">{description}</p>
+      </header>
+      {settings.length === 0 ? (
+        <div className="admin-panel p-6">
+          No settings are available in this category.
+        </div>
+      ) : (
+        groups
+          .filter((g) => g.keys.length > 0)
+          .map((group) =>
+            group.advanced ? (
+              <details
+                key={group.title}
+                className="admin-panel p-6"
+                open={group.keys.some((s) => errors[s.key]) || undefined}
+              >
+                <summary className="cursor-pointer font-semibold text-white">
+                  {group.title}
+                </summary>
+                <p className="text-sm text-amber-200 my-4">
+                  Signing keys are sensitive. Changes are saved individually,
+                  not as an atomic key pair. Keep a recovery path before
+                  changing authentication configuration.
+                </p>
+                <div className="space-y-6 mt-6">
+                  {group.keys.map(renderField)}
+                </div>
+              </details>
+            ) : (
+              <section key={group.title} className="admin-panel p-6">
+                <h2 className="text-lg font-semibold text-white mb-6">
+                  {group.title}
+                </h2>
+                <div className="space-y-6">{group.keys.map(renderField)}</div>
+              </section>
+            ),
+          )
+      )}
+      <div className="sticky bottom-0 admin-panel p-4 flex flex-wrap items-center gap-3">
+        <p className="text-sm text-slate-300 mr-auto" role="status">
+          {status ||
+            (changed.length
+              ? `${changed.length} unsaved ${changed.length === 1 ? "change" : "changes"}`
+              : "No unsaved changes")}
+        </p>
+        <button
+          type="button"
+          className="btn-ghost"
+          disabled={!changed.length || saving}
+          onClick={discard}
+        >
+          Discard changes
+        </button>
+        <button
+          type="submit"
+          className="btn-primary"
+          disabled={!changed.length || saving}
+        >
+          {saving ? "Saving…" : "Save changes"}
+        </button>
+      </div>
+    </form>
+  );
+};
+
+const AdminSettings = () => {
+  const { section } = useParams();
+  const {
+    data: settings = [],
+    isLoading,
+    error,
+    refetch,
+  } = useGetSettingsQuery();
+  if (!["authentication", "notifications"].includes(section || ""))
+    return <Navigate to="/admin/settings/authentication" replace />;
+  if (isLoading)
+    return (
+      <p role="status" className="p-6">
+        Loading settings…
+      </p>
+    );
+  if (error && settings.length === 0)
+    return (
+      <div role="alert" className="admin-panel p-6">
+        <p>Could not load settings. Your configuration has not been changed.</p>
+        <button className="btn-ghost mt-4" onClick={() => refetch()}>
+          Retry
+        </button>
+      </div>
+    );
+  return (
+    <>
+      {error && (
+        <div role="alert" className="admin-panel p-4 mb-6">
+          <p>Could not refresh settings. Your current edits have been kept.</p>
+          <button className="btn-ghost mt-3" onClick={() => refetch()}>
+            Retry refresh
+          </button>
+        </div>
+      )}
+      <SettingsForm
+        key={section}
+        settings={settings.filter(
+          (s) =>
+            s.category ===
+            (section === "authentication" ? "auth" : "notification"),
+        )}
+        title={
+          section === "authentication" ? "Authentication" : "Notifications"
+        }
+        description={
+          section === "authentication"
+            ? "Configure sign in and administrator access."
+            : "Configure email delivery and notification integrations."
+        }
+      />
+    </>
+  );
 };
 
 export default AdminSettings;

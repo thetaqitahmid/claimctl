@@ -1,105 +1,115 @@
-import { describe, it, expect, vi } from 'vitest';
-import { render, screen, fireEvent } from '@testing-library/react';
-import ConfirmationModal from './ConfirmationModal';
+import { beforeEach, describe, it, expect, vi } from "vitest";
+import { render, screen, waitFor } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+import ConfirmationModal from "./ConfirmationModal";
 
-describe('ConfirmationModal', () => {
-  const defaultProps = {
-    isOpen: true,
-    onClose: vi.fn(),
-    onConfirm: vi.fn(),
-    title: 'Confirm Action',
-    message: 'Are you sure you want to proceed?',
-  };
+const props = {
+  isOpen: true,
+  onClose: vi.fn(),
+  onConfirm: vi.fn(),
+  title: "Confirm action",
+  message: "Are you sure?",
+};
 
-  beforeEach(() => {
-    vi.clearAllMocks();
+beforeEach(() => vi.clearAllMocks());
+
+describe("ConfirmationModal", () => {
+  it("renders nothing when closed", () => {
+    render(<ConfirmationModal {...props} isOpen={false} />);
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
   });
 
-  it('renders nothing when isOpen is false', () => {
-    const { container } = render(
-      <ConfirmationModal {...defaultProps} isOpen={false} />
+  it("has an accessible title and description", () => {
+    render(<ConfirmationModal {...props} />);
+    expect(
+      screen.getByRole("dialog", { name: "Confirm action" }),
+    ).toHaveAccessibleDescription("Are you sure?");
+  });
+
+  it("cancels without confirming", async () => {
+    const user = userEvent.setup();
+    render(<ConfirmationModal {...props} />);
+    await user.click(screen.getByRole("button", { name: "Cancel" }));
+    expect(props.onClose).toHaveBeenCalledOnce();
+    expect(props.onConfirm).not.toHaveBeenCalled();
+  });
+
+  it("closes with the labelled close button", async () => {
+    const user = userEvent.setup();
+    render(<ConfirmationModal {...props} />);
+    await user.click(
+      screen.getByRole("button", { name: "Close confirmation" }),
     );
-
-    expect(container.firstChild).toBeNull();
+    expect(props.onClose).toHaveBeenCalledOnce();
   });
 
-  it('renders modal when isOpen is true', () => {
-    render(<ConfirmationModal {...defaultProps} />);
-
-    expect(screen.getByText('Confirm Action')).toBeInTheDocument();
-    expect(screen.getByText('Are you sure you want to proceed?')).toBeInTheDocument();
+  it("closes after a successful confirmation", async () => {
+    const user = userEvent.setup();
+    render(<ConfirmationModal {...props} />);
+    await user.click(screen.getByRole("button", { name: "Confirm" }));
+    await waitFor(() => expect(props.onClose).toHaveBeenCalledOnce());
+    expect(props.onConfirm).toHaveBeenCalledOnce();
   });
 
-  it('displays default button text', () => {
-    render(<ConfirmationModal {...defaultProps} />);
-
-    expect(screen.getByText('Confirm')).toBeInTheDocument();
-    expect(screen.getByText('Cancel')).toBeInTheDocument();
-  });
-
-  it('displays custom button text', () => {
+  it("requires the exact confirmation word", async () => {
+    const user = userEvent.setup();
     render(
       <ConfirmationModal
-        {...defaultProps}
-        confirmText="Delete"
-        cancelText="Keep"
-      />
+        {...props}
+        confirmationWord="RESTORE"
+        confirmText="Restore backup"
+      />,
     );
-
-    expect(screen.getByText('Delete')).toBeInTheDocument();
-    expect(screen.getByText('Keep')).toBeInTheDocument();
+    const confirm = screen.getByRole("button", { name: "Restore backup" });
+    expect(confirm).toBeDisabled();
+    await user.type(screen.getByRole("textbox"), "restore");
+    expect(confirm).toBeDisabled();
+    await user.clear(screen.getByRole("textbox"));
+    await user.type(screen.getByRole("textbox"), "RESTORE");
+    expect(confirm).toBeEnabled();
   });
 
-  it('calls onClose when cancel button is clicked', () => {
-    render(<ConfirmationModal {...defaultProps} />);
-
-    fireEvent.click(screen.getByText('Cancel'));
-
-    expect(defaultProps.onClose).toHaveBeenCalledTimes(1);
-    expect(defaultProps.onConfirm).not.toHaveBeenCalled();
-  });
-
-  it('calls onClose when X button is clicked', () => {
-    const { container } = render(<ConfirmationModal {...defaultProps} />);
-
-    // Find the X button (it's the first button in the modal header)
-    const closeButton = container.querySelector('button');
-    fireEvent.click(closeButton!);
-
-    expect(defaultProps.onClose).toHaveBeenCalled();
-  });
-
-  it('calls onConfirm and onClose when confirm button is clicked', () => {
-    render(<ConfirmationModal {...defaultProps} />);
-
-    fireEvent.click(screen.getByText('Confirm'));
-
-    expect(defaultProps.onConfirm).toHaveBeenCalledTimes(1);
-    expect(defaultProps.onClose).toHaveBeenCalledTimes(1);
-  });
-
-  it('applies destructive styling when isDestructive is true', () => {
-    render(<ConfirmationModal {...defaultProps} isDestructive={true} />);
-
-    const confirmButton = screen.getByText('Confirm');
-    expect(confirmButton).toHaveClass('bg-red-500');
-  });
-
-  it('applies normal styling when isDestructive is false', () => {
-    render(<ConfirmationModal {...defaultProps} isDestructive={false} />);
-
-    const confirmButton = screen.getByText('Confirm');
-    expect(confirmButton).toHaveClass('bg-cyan-600');
-  });
-
-  it('renders ReactNode message content', () => {
-    render(
-      <ConfirmationModal
-        {...defaultProps}
-        message={<span data-testid="custom-message">Custom content</span>}
-      />
+  it("keeps failures open and permits retry", async () => {
+    const user = userEvent.setup();
+    const confirm = vi
+      .fn()
+      .mockRejectedValueOnce({ data: { error: "Service unavailable" } })
+      .mockResolvedValue(undefined);
+    render(<ConfirmationModal {...props} onConfirm={confirm} />);
+    await user.click(screen.getByRole("button", { name: "Confirm" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "Service unavailable",
     );
+    expect(props.onClose).not.toHaveBeenCalled();
+    await user.click(screen.getByRole("button", { name: "Confirm" }));
+    await waitFor(() => expect(props.onClose).toHaveBeenCalledOnce());
+  });
 
-    expect(screen.getByTestId('custom-message')).toBeInTheDocument();
+  it("disables dismissal and duplicate submissions while pending", async () => {
+    const user = userEvent.setup();
+    let resolve!: () => void;
+    const confirm = vi.fn(
+      () =>
+        new Promise<void>((done) => {
+          resolve = done;
+        }),
+    );
+    render(<ConfirmationModal {...props} onConfirm={confirm} />);
+    await user.click(screen.getByRole("button", { name: "Confirm" }));
+    expect(screen.getByRole("button", { name: "Working…" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Cancel" })).toBeDisabled();
+    await user.keyboard("{Escape}");
+    expect(props.onClose).not.toHaveBeenCalled();
+    resolve();
+    await waitFor(() => expect(props.onClose).toHaveBeenCalledOnce());
+    expect(confirm).toHaveBeenCalledOnce();
+  });
+
+  it("can let the caller handle navigation without a second close", async () => {
+    const user = userEvent.setup();
+    render(<ConfirmationModal {...props} closeOnConfirm={false} />);
+    await user.click(screen.getByRole("button", { name: "Confirm" }));
+    expect(props.onConfirm).toHaveBeenCalledOnce();
+    expect(props.onClose).not.toHaveBeenCalled();
   });
 });

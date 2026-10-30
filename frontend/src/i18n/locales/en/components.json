@@ -1,7 +1,7 @@
 {
   "navbar": {
     "userMenu": "User Menu",
-    "profile": "Profile",
+    "profile": "My Profile",
     "logout": "Logout",
     "adminPanel": "Admin Panel",
     "secrets": "Secrets",
@@ -17,6 +17,8 @@
     "edit": "Edit",
     "delete": "Delete",
     "queue": "Queue",
+    "joinQueue": "Join queue",
+    "adminActions": "Admin actions",
     "inQueue": "In Queue",
     "cancelAll": "Cancel All Reservations",
     "reservedSuccess": "Reservation accepted. Check the current status below and release it when you are finished.",

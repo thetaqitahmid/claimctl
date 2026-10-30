@@ -1,156 +1,182 @@
 import { useState } from "react";
-import { Users, Plus, Edit, Trash2, UserPlus, Info } from "lucide-react";
+import { Plus } from "lucide-react";
 import { useGetGroupsQuery, useDeleteGroupMutation } from "../store/api/groups";
 import { UserGroup } from "../types";
 import { GroupModal } from "./GroupModal";
 import { GroupMembersModal } from "./GroupMembersModal";
+import ConfirmationModal from "./ConfirmationModal";
+import { useNotificationContext } from "../hooks/useNotification";
 
 const GroupManagement = () => {
-  const { data: groupsData, isLoading, error } = useGetGroupsQuery();
-  const groups = groupsData || [];
+  const { data: groups = [], isLoading, error, refetch } = useGetGroupsQuery();
   const [deleteGroup] = useDeleteGroupMutation();
-
-  const [selectedGroup, setSelectedGroup] = useState<UserGroup | undefined>(undefined);
+  const [selectedGroup, setSelectedGroup] = useState<UserGroup>();
   const [isGroupModalOpen, setIsGroupModalOpen] = useState(false);
-  const [isMembersModalOpen, setIsMembersModalOpen] = useState(false);
-
-  // For editing/members modals, we need to know which group is active
   const [activeGroupId, setActiveGroupId] = useState<string | null>(null);
+  const [groupToDelete, setGroupToDelete] = useState<UserGroup | null>(null);
+  const [search, setSearch] = useState("");
+  const [page, setPage] = useState(0);
+  const { showNotification } = useNotificationContext();
+  const filtered = groups.filter((group) =>
+    `${group.name} ${group.description}`
+      .toLowerCase()
+      .includes(search.toLowerCase()),
+  );
+  const pageCount = Math.max(1, Math.ceil(filtered.length / 12));
+  const currentPage = Math.min(page, pageCount - 1);
 
-  const activeGroup = groups.find(g => g.id === activeGroupId) || null;
-
-  const handleCreate = () => {
+  const openCreate = () => {
     setSelectedGroup(undefined);
     setIsGroupModalOpen(true);
   };
-
-  const handleEdit = (group: UserGroup) => {
-    setSelectedGroup(group);
-    setIsGroupModalOpen(true);
-  };
-
-  const handleManageMembers = (group: UserGroup) => {
-    setActiveGroupId(group.id);
-    setIsMembersModalOpen(true);
-  };
-
-  const handleDelete = async (group: UserGroup) => {
-    if (window.confirm(`Are you sure you want to delete group "${group.name}"?`)) {
-      try {
-        await deleteGroup(group.id).unwrap();
-      } catch (err) {
-        console.error("Failed to delete group:", err);
-      }
-    }
-  };
-
-  const closeModal = () => {
-    setIsGroupModalOpen(false);
-    setSelectedGroup(undefined);
+  const handleDelete = async () => {
+    if (!groupToDelete) return;
+    await deleteGroup(groupToDelete.id).unwrap();
+    showNotification("success", `Group ${groupToDelete.name} deleted`);
   };
 
   return (
-    <div className="mb-12">
-      <div className="flex items-center justify-between mb-6">
+    <div className="space-y-6">
+      <header className="flex flex-wrap items-center justify-between gap-4">
         <div>
-          <h2 className="text-3xl font-bold text-white tracking-tight flex items-center gap-3">
-            <Users className="w-8 h-8 text-brand-queued" />
-            User Groups
-          </h2>
-          <p className="text-slate-400 mt-1">Manage user groups and access control</p>
+          <p className="text-sm text-slate-400 mb-2">
+            Administration / People and access
+          </p>
+          <h1 className="text-3xl font-semibold text-white">Groups</h1>
+          <p className="text-slate-400 mt-2">
+            Organize people into groups, then grant groups access to spaces.
+          </p>
         </div>
-        <button
-          onClick={handleCreate}
-          className="btn-primary"
-        >
-          <Plus className="w-4 h-4" />
-          Create Group
+        <button className="btn-primary" onClick={openCreate}>
+          <Plus size={18} />
+          Create group
         </button>
-      </div>
-
-      {/* Error State */}
-      {error && (
-        <div className="glass-panel p-4 rounded-xl border-brand-busy/20 bg-brand-busy/5 mb-6 text-center">
-          <p className="text-brand-busy font-medium">Failed to fetch groups</p>
-        </div>
-      )}
-
-      {/* Loading State */}
+      </header>
+      <label className="block max-w-lg text-sm text-slate-300">
+        Search groups
+        <input
+          className="admin-input mt-2"
+          type="search"
+          value={search}
+          onChange={(e) => {
+            setSearch(e.target.value);
+            setPage(0);
+          }}
+          placeholder="Name or description"
+        />
+      </label>
       {isLoading ? (
-        <div className="flex flex-col items-center justify-center p-20 glass-panel rounded-xl">
-           <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-brand-queued mb-4"></div>
-           <p className="text-slate-400 font-medium">Loading groups...</p>
-        </div>
-      ) : groups.length === 0 ? (
-        <div className="flex flex-col items-center justify-center py-16 glass-panel rounded-xl border-dashed border-2 border-slate-800">
-          <Users className="w-12 h-12 text-slate-700 mb-4" />
-          <h3 className="text-lg font-medium text-white">No groups found</h3>
-          <p className="text-slate-400 mb-4">Create groups to manage permissions effectively</p>
-          <button onClick={handleCreate} className="btn-secondary">
-            Create First Group
+        <p role="status">Loading groups…</p>
+      ) : error ? (
+        <div role="alert" className="admin-panel p-6">
+          <p>Could not load groups.</p>
+          <button className="btn-ghost mt-3" onClick={() => refetch()}>
+            Retry
           </button>
         </div>
+      ) : groups.length === 0 ? (
+        <div className="admin-panel p-10 text-center">
+          <h2 className="text-lg font-medium text-white">No groups yet</h2>
+          <p className="text-slate-400 my-3">
+            Create a group to manage access for a team.
+          </p>
+          <button className="btn-primary mx-auto" onClick={openCreate}>
+            Create first group
+          </button>
+        </div>
+      ) : filtered.length === 0 ? (
+        <p className="admin-panel p-6">No groups match your search.</p>
       ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-          {groups.map((group) => (
-            <div key={group.id} className="glass-panel p-5 rounded-xl hover:bg-slate-800/50 transition-all group">
-              <div className="flex justify-between items-start mb-3">
-                <div className="p-2 rounded-lg bg-cyan-500/10 text-cyan-400">
-                  <Users className="w-6 h-6" />
-                </div>
-                <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+        <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
+          {filtered
+            .slice(currentPage * 12, (currentPage + 1) * 12)
+            .map((group) => (
+              <article key={group.id} className="admin-panel p-5">
+                <h2 className="text-lg font-semibold text-white">
+                  {group.name}
+                </h2>
+                <p className="text-sm text-slate-400 mt-2 mb-5">
+                  {group.description || "No description provided."}
+                </p>
+                <div className="flex flex-wrap gap-2">
                   <button
-                    onClick={() => handleManageMembers(group)}
-                    className="p-1.5 rounded-lg text-slate-400 hover:text-emerald-400 hover:bg-emerald-400/10 transition-colors"
-                    title="Manage Members"
+                    className="btn-ghost"
+                    aria-label={`Manage members of ${group.name}`}
+                    onClick={() => setActiveGroupId(group.id)}
                   >
-                    <UserPlus className="w-4 h-4" />
+                    Members
                   </button>
                   <button
-                    onClick={() => handleEdit(group)}
-                    className="p-1.5 rounded-lg text-slate-400 hover:text-cyan-400 hover:bg-cyan-400/10 transition-colors"
-                    title="Edit Group"
+                    className="btn-ghost"
+                    aria-label={`Edit ${group.name}`}
+                    onClick={() => {
+                      setSelectedGroup(group);
+                      setIsGroupModalOpen(true);
+                    }}
                   >
-                    <Edit className="w-4 h-4" />
+                    Edit
                   </button>
                   <button
-                    onClick={() => handleDelete(group)}
-                    className="p-1.5 rounded-lg text-slate-400 hover:text-red-400 hover:bg-red-400/10 transition-colors"
-                    title="Delete Group"
+                    className="btn-ghost text-red-300"
+                    aria-label={`Delete ${group.name}`}
+                    onClick={() => setGroupToDelete(group)}
                   >
-                    <Trash2 className="w-4 h-4" />
+                    Delete
                   </button>
                 </div>
-              </div>
-
-              <h3 className="text-lg font-semibold text-white mb-1">{group.name}</h3>
-              <p className="text-sm text-slate-400 line-clamp-2 h-10 mb-4">
-                {group.description || <span className="italic text-slate-600">No description</span>}
-              </p>
-
-              <div className="flex items-center text-xs text-slate-500 gap-4 pt-3 border-t border-slate-800">
-                <div className="flex items-center gap-1">
-                  <Info className="w-3 h-3" />
-                  ID: {group.id}
-                </div>
-                {/* We could show member count here if the API returned it directly */}
-              </div>
-            </div>
-          ))}
+              </article>
+            ))}
         </div>
       )}
-
-      {/* Modals */}
+      {!error && filtered.length > 0 && (
+        <nav
+          aria-label="Group pagination"
+          className="flex flex-wrap items-center gap-3 text-sm"
+        >
+          <p className="mr-auto">
+            {filtered.length} groups · Page {currentPage + 1} of {pageCount}
+          </p>
+          <button
+            className="btn-ghost"
+            disabled={currentPage === 0}
+            onClick={() => setPage(currentPage - 1)}
+          >
+            Previous
+          </button>
+          <button
+            className="btn-ghost"
+            disabled={currentPage === pageCount - 1}
+            onClick={() => setPage(currentPage + 1)}
+          >
+            Next
+          </button>
+        </nav>
+      )}
       <GroupModal
-        isOpen={isGroupModalOpen}
-        onClose={closeModal}
         group={selectedGroup}
+        isOpen={isGroupModalOpen}
+        onClose={() => setIsGroupModalOpen(false)}
       />
-
       <GroupMembersModal
-        isOpen={isMembersModalOpen}
-        onClose={() => setIsMembersModalOpen(false)}
-        group={activeGroup}
+        key={activeGroupId || "closed"}
+        group={groups.find((g) => g.id === activeGroupId) || null}
+        isOpen={Boolean(activeGroupId)}
+        onClose={() => setActiveGroupId(null)}
+      />
+      <ConfirmationModal
+        isOpen={Boolean(groupToDelete)}
+        onClose={() => setGroupToDelete(null)}
+        onConfirm={handleDelete}
+        title="Delete group"
+        message={
+          <>
+            Delete <strong>{groupToDelete?.name}</strong>? Members will lose
+            access granted through this group. Their user accounts will not be
+            deleted.
+          </>
+        }
+        confirmText="Delete group"
+        isDestructive
       />
     </div>
   );

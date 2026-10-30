@@ -1,4 +1,5 @@
 import React, { useState } from "react";
+import ConfirmationModal from "../components/ConfirmationModal";
 import { Plus, Trash, Edit2 } from "lucide-react";
 import {
   useGetSecretsQuery,
@@ -9,7 +10,12 @@ import {
 } from "../store/api/secrets";
 
 const Secrets: React.FC = () => {
-  const { data: secrets = [], isLoading, error } = useGetSecretsQuery();
+  const {
+    data: secrets = [],
+    isLoading,
+    error,
+    refetch,
+  } = useGetSecretsQuery();
   const [createSecret] = useCreateSecretMutation();
   const [updateSecret] = useUpdateSecretMutation();
   const [deleteSecret] = useDeleteSecretMutation();
@@ -21,6 +27,7 @@ const Secrets: React.FC = () => {
     description: "",
   });
   const [editId, setEditId] = useState<string | null>(null);
+  const [deleteId, setDeleteId] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
 
   const handleCreateSecret = async (e: React.FormEvent) => {
@@ -53,21 +60,33 @@ const Secrets: React.FC = () => {
     setShowCreateModal(true);
   };
 
-  const handleDeleteSecret = async (id: string) => {
-    if (!confirm("Are you sure you want to delete this secret?")) return;
-    try {
-      await deleteSecret(id).unwrap();
-    } catch (err: unknown) {
-      const message =
-        (err as { data?: { error?: string } })?.data?.error ||
-        (err instanceof Error ? err.message : "Failed to delete secret");
-      setActionError(message);
-    }
-  };
+  const handleDeleteSecret = (id: string) => setDeleteId(id);
 
   return (
-    <div className="min-h-screen bg-slate-950 text-slate-200 font-sans selection:bg-cyan-500/30">
-      <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+    <div>
+      <ConfirmationModal
+        isOpen={Boolean(deleteId)}
+        onClose={() => setDeleteId(null)}
+        title="Delete secret"
+        message={
+          <>
+            Delete{" "}
+            <strong>
+              {secrets.find((secret) => secret.id === deleteId)?.key}
+            </strong>
+            ? Integrations using this secret may stop working.
+          </>
+        }
+        confirmText="Delete secret"
+        isDestructive
+        onConfirm={async () => {
+          if (deleteId) await deleteSecret(deleteId).unwrap();
+        }}
+      />
+      <p className="text-sm text-slate-400 mb-2">
+        Administration / Integrations
+      </p>
+      <section aria-label="Secrets management">
         <div className="flex justify-between items-center mb-8">
           <h1 className="text-3xl font-bold text-white tracking-tight">
             Secrets Management
@@ -95,10 +114,15 @@ const Secrets: React.FC = () => {
             <span className="block sm:inline">
               {actionError || "Failed to load secrets"}
             </span>
+            {error && (
+              <button className="btn-ghost mt-3" onClick={() => refetch()}>
+                Retry
+              </button>
+            )}
           </div>
         )}
 
-        {isLoading ? (
+        {error ? null : isLoading ? (
           <div className="flex justify-center items-center h-64">
             <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-cyan-600"></div>
           </div>
@@ -180,7 +204,7 @@ const Secrets: React.FC = () => {
             </table>
           </div>
         )}
-      </main>
+      </section>
 
       {showCreateModal && (
         <div className="fixed inset-0 z-10 overflow-y-auto">
@@ -198,6 +222,11 @@ const Secrets: React.FC = () => {
             </span>
             <div className="inline-block align-bottom bg-slate-900 rounded-xl border border-slate-700 text-left overflow-hidden shadow-xl transform transition-all sm:my-8 sm:align-middle sm:max-w-lg sm:w-full">
               <form onSubmit={handleCreateSecret}>
+                {actionError && (
+                  <p role="alert" className="text-red-300 mb-4">
+                    {actionError}
+                  </p>
+                )}
                 <div className="px-4 pt-5 pb-4 sm:p-6 sm:pb-4">
                   <h3 className="text-lg leading-6 font-bold text-white mb-4">
                     {editId ? "Update Secret" : "Create New Secret"}

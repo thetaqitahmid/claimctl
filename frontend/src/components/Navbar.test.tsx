@@ -1,7 +1,12 @@
-import { describe, it, expect } from "vitest";
-import { screen, fireEvent } from "@testing-library/react";
+import { describe, it, expect, vi } from "vitest";
+import { screen } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { renderWithProviders } from "../test/utils";
 import Navbar from "./Navbar";
+
+vi.mock("../hooks/useNotification", () => ({
+  useNotificationContext: () => ({ showNotification: vi.fn() }),
+}));
 
 describe("Navbar", () => {
   it("renders the app name", () => {
@@ -25,7 +30,7 @@ describe("Navbar", () => {
     expect(screen.getByText("Test User")).toBeInTheDocument();
   });
 
-  it("opens user dropdown on click", () => {
+  it("opens user dropdown on click", async () => {
     renderWithProviders(<Navbar />, {
       preloadedState: {
         authSlice: {
@@ -36,15 +41,15 @@ describe("Navbar", () => {
         },
       },
     });
-    
+
     const userButton = screen.getByText("Test User");
-    fireEvent.click(userButton);
-    
+    await userEvent.click(userButton);
+
     expect(screen.getByText("profile")).toBeInTheDocument();
     expect(screen.getByText("logout")).toBeInTheDocument();
   });
 
-  it("shows admin links for admin users", () => {
+  it("shows administration outside the account menu for admin users", async () => {
     renderWithProviders(<Navbar />, {
       preloadedState: {
         authSlice: {
@@ -55,17 +60,17 @@ describe("Navbar", () => {
         },
       },
     });
-    
-    const userButton = screen.getByText("Admin User");
-    fireEvent.click(userButton);
-    
-    expect(screen.getByText("adminPanel")).toBeInTheDocument();
-    expect(screen.getByText("secrets")).toBeInTheDocument();
-    expect(screen.getByText("webhooks")).toBeInTheDocument();
-    expect(screen.getByText("settings")).toBeInTheDocument();
+
+    expect(
+      screen.getByRole("link", { name: "Administration" }),
+    ).toHaveAttribute("href", "/admin");
+    await userEvent.click(screen.getByText("Admin User"));
+    expect(screen.getByText("profile")).toBeInTheDocument();
+    expect(screen.queryByText("secrets")).not.toBeInTheDocument();
+    expect(screen.queryByText("settings")).not.toBeInTheDocument();
   });
 
-  it("does not show admin links for regular users", () => {
+  it("does not show admin links for regular users", async () => {
     renderWithProviders(<Navbar />, {
       preloadedState: {
         authSlice: {
@@ -76,11 +81,13 @@ describe("Navbar", () => {
         },
       },
     });
-    
+
     const userButton = screen.getByText("Regular User");
-    fireEvent.click(userButton);
-    
-    expect(screen.queryByText("adminPanel")).not.toBeInTheDocument();
+    await userEvent.click(userButton);
+
+    expect(
+      screen.queryByRole("link", { name: "Administration" }),
+    ).not.toBeInTheDocument();
     expect(screen.queryByText("secrets")).not.toBeInTheDocument();
   });
 });

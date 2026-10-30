@@ -17,6 +17,7 @@ export const secretsApi = createApi({
   endpoints: (builder) => ({
     getSecrets: builder.query<Secret[], void>({
       query: () => "/secrets",
+      transformResponse: (response: Secret[] | null) => response || [],
       providesTags: ["Secret"],
     }),
     createSecret: builder.mutation<

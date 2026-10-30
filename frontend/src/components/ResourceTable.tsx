@@ -12,6 +12,7 @@ import {
 } from "@tanstack/react-table";
 import { useMemo, useState, Fragment } from "react";
 import { useTranslation } from "react-i18next";
+import { Menu, MenuButton, MenuItems, MenuItem } from "@headlessui/react";
 import { ResourceWithStatus, UserReservation } from "../types";
 import {
   Tag,
@@ -25,7 +26,6 @@ import {
   Eye,
   ChevronRight,
   ChevronDown,
-  Wrench,
 } from "lucide-react";
 import QueueListModal from "./QueueListModal";
 import HealthStatusIndicator from "./HealthStatusIndicator";
@@ -364,7 +364,7 @@ const ResourceTable = ({
                       title={t("components:resourceList.release")}
                      className="p-1.5 rounded bg-brand-available/10 text-brand-available hover:bg-brand-available/20 border border-brand-available/20 transition-all"
                    >
-                     <CheckCircle className="w-3.5 h-3.5" />
+                     <CheckCircle className="w-3.5 h-3.5 inline mr-1" />{t("components:resourceList.release")}
                    </button>
                  ) : userReservation?.status === 'pending' ? (
                      <button
@@ -373,7 +373,7 @@ const ResourceTable = ({
                       title={t("common:cancel")}
                      className="p-1.5 rounded bg-brand-busy/10 text-brand-busy hover:bg-brand-busy/20 border border-brand-busy/20 transition-all"
                     >
-                      <XCircle className="w-3.5 h-3.5" />
+                      <XCircle className="w-3.5 h-3.5 inline mr-1" />{t("common:cancel")}
                     </button>
                 ) : (
                      <button
@@ -388,7 +388,8 @@ const ResourceTable = ({
                             : "bg-brand-available/10 text-brand-available hover:bg-brand-available/20 border-brand-available/20"
                         }`}
                     >
-                        {resource.activeReservations > 0 ? <Clock className="w-3.5 h-3.5"/> : <Lock className="w-3.5 h-3.5"/>}
+                        {resource.activeReservations > 0 ? <Clock className="w-3.5 h-3.5 inline mr-1"/> : <Lock className="w-3.5 h-3.5 inline mr-1"/>}
+                        {isUnderMaintenance ? t("common:status.maintenance") : resource.activeReservations > 0 ? t("components:resourceList.joinQueue") : t("components:resourceList.reserve")}
                     </button>
                 )}
 
@@ -397,45 +398,17 @@ const ResourceTable = ({
                 className="p-1.5 rounded bg-slate-800/50 text-slate-400 hover:text-white border border-slate-700/50 hover:border-slate-600 transition-all"
                 title={t("components:resourceList.view")}
               >
-                <Eye className="w-3.5 h-3.5" />
+                <Eye className="w-3.5 h-3.5 inline mr-1" />{t("components:resourceList.view")}
               </button>
 
-              {isAdmin && (
-                <>
-                  {(resource.activeReservations > 0 || resource.queueLength > 0) && onCancelAll && (
-                    <button
-                      disabled={isBusy}
-                      onClick={() => onCancelAll(resource.resource.id)}
-                      className="p-1.5 rounded bg-red-500/10 text-red-500 hover:bg-red-500/20 border border-red-500/20 transition-all"
-                      title={t("components:resourceList.cancelAll")}
-                    >
-                      <XCircle className="w-3.5 h-3.5" />
-                    </button>
-                  )}
-                  {onMaintenanceToggle && (
-                    <button
-                      disabled={isBusy}
-                      onClick={() => onMaintenanceToggle(resource.resource.id, resource.resource.name, !!resource.resource.isUnderMaintenance)}
-                      className={`p-1.5 rounded transition-all border ${
-                        resource.resource.isUnderMaintenance
-                        ? "bg-orange-500/10 text-orange-500 hover:bg-orange-500/20 border-orange-500/20"
-                        : "bg-slate-700/50 text-slate-400 hover:text-orange-500 hover:bg-orange-500/10 border-slate-600/50 hover:border-orange-500/20"
-                      }`}
-                      title={resource.resource.isUnderMaintenance ? t("components:resourceList.maintenance.disable") : t("components:resourceList.maintenance.enable")}
-                    >
-                      <Wrench className="w-3.5 h-3.5" />
-                    </button>
-                  )}
-                  <button
-                    disabled={isBusy}
-                    onClick={() => onDelete(resource.resource.id)}
-                    className="p-1.5 rounded bg-brand-busy/10 text-brand-busy hover:bg-brand-busy/20 border border-brand-busy/20 transition-all"
-                    title={t("components:resourceList.delete")}
-                  >
-                    <Trash className="w-3.5 h-3.5" />
-                  </button>
-                </>
-              )}
+              {isAdmin && <Menu>
+                <MenuButton disabled={isBusy} className="btn-ghost text-sm py-1.5 px-2">{t("components:resourceList.adminActions")}<ChevronDown size={14} /></MenuButton>
+                <MenuItems anchor="bottom end" className="z-50 min-w-56 rounded-lg border border-slate-600 bg-slate-900 p-1 shadow-xl [--anchor-gap:8px]">
+                  {(resource.activeReservations > 0 || resource.queueLength > 0) && onCancelAll && <MenuItem disabled={isBusy}><button disabled={isBusy} className="block w-full text-left px-3 py-2 text-red-300 data-[focus]:bg-slate-800" onClick={() => onCancelAll(resource.resource.id)}>{t("components:resourceList.cancelAll")}</button></MenuItem>}
+                  {onMaintenanceToggle && <MenuItem disabled={isBusy}><button disabled={isBusy} className="block w-full text-left px-3 py-2 text-slate-200 data-[focus]:bg-slate-800" onClick={() => onMaintenanceToggle(resource.resource.id, resource.resource.name, !!resource.resource.isUnderMaintenance)}>{t(resource.resource.isUnderMaintenance ? "components:resourceList.maintenance.disable" : "components:resourceList.maintenance.enable")}</button></MenuItem>}
+                  <MenuItem disabled={isBusy}><button disabled={isBusy} className="block w-full text-left px-3 py-2 text-red-300 data-[focus]:bg-slate-800" onClick={() => onDelete(resource.resource.id)}><Trash size={14} className="inline mr-2" />{t("components:resourceList.delete")}</button></MenuItem>
+                </MenuItems>
+              </Menu>}
             </div>
           );
         },

@@ -10,8 +10,8 @@ export interface Resource {
   isUnderMaintenance?: boolean;
 }
 
-export type HealthCheckType = 'ping' | 'http' | 'tcp';
-export type HealthStatus = 'healthy' | 'degraded' | 'down' | 'unknown';
+export type HealthCheckType = "ping" | "http" | "tcp";
+export type HealthStatus = "healthy" | "degraded" | "down" | "unknown";
 
 export interface HealthConfig {
   resourceId: string;
@@ -73,10 +73,10 @@ export interface ReservationOptions {
 }
 
 export interface UserReservation {
-    id: string;
-    resourceId: string;
-    status: string;
-    queuePosition: number;
+  id: string;
+  resourceId: string;
+  status: string;
+  queuePosition: number;
 }
 
 export interface Space {
@@ -96,10 +96,10 @@ export interface UserGroup {
 }
 
 export interface GroupMember {
-  userId: string;
-  groupId: string;
-  joinedAt: number;
-  user?: UserProps;
+  id: string;
+  name: string;
+  email: string;
+  role: string;
 }
 
 export interface SpacePermission {

@@ -1,171 +1,228 @@
-import React, { useState } from "react";
-import { UserGroup } from "../types";
-import { useGetGroupMembersQuery, useAddUserToGroupMutation, useRemoveUserFromGroupMutation } from "../store/api/groups";
+import { useState } from "react";
+import { Dialog, DialogPanel, DialogTitle } from "@headlessui/react";
+import { UserGroup, GroupMember } from "../types";
+import {
+  useGetGroupMembersQuery,
+  useAddUserToGroupMutation,
+  useRemoveUserFromGroupMutation,
+} from "../store/api/groups";
 import { useGetUsersQuery } from "../store/api/users";
-import { X, Trash2, UserPlus, Search, User } from "lucide-react";
+import ConfirmationModal from "./ConfirmationModal";
 
-interface GroupMembersModalProps {
-  group: UserGroup | null;
-  onClose: () => void;
-  isOpen: boolean;
-}
-
-interface FlatGroupMember {
-  id: string;
-  name: string;
-  email: string;
-}
-
-export const GroupMembersModal: React.FC<GroupMembersModalProps> = ({
+export const GroupMembersModal = ({
   group,
   onClose,
   isOpen,
+}: {
+  group: UserGroup | null;
+  onClose: () => void;
+  isOpen: boolean;
 }) => {
-  const [searchTerm, setSearchTerm] = useState("");
-  const { data: membersData, isLoading: isLoadingMembers } = useGetGroupMembersQuery(group?.id || "", {
-    skip: !group,
-  });
-  const members = membersData || [];
-
-  const { data: allUsersData } = useGetUsersQuery();
-  const allUsers = allUsersData || [];
-
-  const [addUser] = useAddUserToGroupMutation();
-  const [removeUser] = useRemoveUserFromGroupMutation();
-
-  if (!isOpen || !group) return null;
-
-  const existingMemberIds = new Set(members.map((m) => (m as unknown as FlatGroupMember).id));
-
-  // Filter users to show only those not in the group and matching search
-  const availableUsers = allUsers.filter(
+  const [search, setSearch] = useState("");
+  const [message, setMessage] = useState("");
+  const [actionError, setActionError] = useState("");
+  const [removing, setRemoving] = useState<GroupMember | null>(null);
+  const {
+    data: members = [],
+    isLoading,
+    error,
+    refetch,
+  } = useGetGroupMembersQuery(group?.id || "", { skip: !group || !isOpen });
+  const {
+    data: users = [],
+    isLoading: usersLoading,
+    error: usersError,
+    refetch: refetchUsers,
+  } = useGetUsersQuery(undefined, { skip: !isOpen });
+  const [addUser, { isLoading: adding }] = useAddUserToGroupMutation();
+  const [removeUser, { isLoading: deleting }] =
+    useRemoveUserFromGroupMutation();
+  const available = users.filter(
     (user) =>
-      !existingMemberIds.has(user.id) &&
-      (user.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-       user.email.toLowerCase().includes(searchTerm.toLowerCase()))
+      !members.some((m) => m.id === user.id) &&
+      `${user.name} ${user.email}`.toLowerCase().includes(search.toLowerCase()),
   );
 
-  const handleAddUser = async (userId: string) => {
+  const add = async (userId: string, name: string) => {
+    if (!group) return;
+    setActionError("");
+    setMessage("");
     try {
       await addUser({ groupId: group.id, userId }).unwrap();
-    } catch (error) {
-      console.error("Failed to add user:", error);
+      setMessage(`${name} added to ${group.name}.`);
+    } catch (err) {
+      setActionError(
+        (err as { data?: { error?: string } })?.data?.error ||
+          "Could not add member. Try again.",
+      );
     }
   };
 
-  const handleRemoveUser = async (userId: string) => {
-    try {
-      await removeUser({ groupId: group.id, userId }).unwrap();
-    } catch (error) {
-      console.error("Failed to remove user:", error);
-    }
+  const close = () => {
+    if (adding || deleting) return;
+    setSearch("");
+    setMessage("");
+    setActionError("");
+    onClose();
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm transition-opacity duration-300">
-      <div
-        className="w-full max-w-2xl bg-slate-900 border border-slate-800 rounded-2xl shadow-2xl overflow-hidden transform transition-all duration-300 scale-100 flex flex-col max-h-[80vh]"
-        onClick={(e) => e.stopPropagation()}
-      >
-        {/* Header */}
-        <div className="flex items-center justify-between px-6 py-4 border-b border-slate-800 bg-slate-900/50 flex-shrink-0">
-          <div>
-            <h2 className="text-xl font-semibold text-white flex items-center gap-2">
-              <UserPlus className="w-5 h-5 text-emerald-400" />
-              Manage Members
-            </h2>
-            <p className="text-sm text-slate-400 mt-1">
-              Group: <span className="text-white font-medium">{group.name}</span>
+    <Dialog
+      open={isOpen && Boolean(group)}
+      onClose={close}
+      className="fixed inset-0 z-50"
+    >
+      <div className="fixed inset-0 bg-slate-950/80" aria-hidden="true" />
+      <div className="fixed inset-0 flex items-center justify-center p-4">
+        <DialogPanel className="admin-panel p-6 w-full max-w-4xl max-h-[90vh] overflow-y-auto">
+          <div className="flex items-start justify-between gap-3 mb-4">
+            <div>
+              <DialogTitle className="text-xl font-semibold text-white">
+                Members of {group?.name}
+              </DialogTitle>
+              <p className="text-sm text-slate-400 mt-2">
+                Members inherit access to spaces granted to this group.
+              </p>
+            </div>
+            <button
+              className="btn-ghost"
+              onClick={close}
+              disabled={adding || deleting}
+            >
+              Close
+            </button>
+          </div>
+          {message && (
+            <p role="status" className="text-emerald-300 my-3">
+              {message}
             </p>
-          </div>
-          <button
-            onClick={onClose}
-            className="text-slate-400 hover:text-white transition-colors p-1 rounded-lg hover:bg-slate-800"
-          >
-            <X className="w-5 h-5" />
-          </button>
-        </div>
-
-        <div className="flex flex-1 overflow-hidden">
-          {/* Left: Current Members */}
-          <div className="w-1/2 border-r border-slate-800 flex flex-col">
-            <div className="p-4 border-b border-slate-800 bg-slate-900/30">
-              <h3 className="text-sm font-medium text-slate-300">Current Members ({members.length})</h3>
+          )}
+          {actionError && (
+            <p role="alert" className="text-red-300 my-3">
+              {actionError}
+            </p>
+          )}
+          {isLoading ? (
+            <p role="status">Loading members…</p>
+          ) : error ? (
+            <div role="alert">
+              <p>Could not load members.</p>
+              <button className="btn-ghost mt-3" onClick={() => refetch()}>
+                Retry
+              </button>
             </div>
-            <div className="flex-1 overflow-y-auto p-4 space-y-2">
-              {isLoadingMembers ? (
-                <div className="text-center py-4 text-slate-500">Loading members...</div>
-              ) : members.length === 0 ? (
-                <div className="text-center py-8 text-slate-500 italic">No members in this group</div>
-              ) : (
-                members.map((item) => {
-                  const member = item as unknown as FlatGroupMember;
-                  return (
-                  <div key={member.id} className="flex items-center justify-between p-3 rounded-xl bg-slate-800/50 border border-slate-700/50 group hover:border-slate-600 transition-all">
-                    <div className="flex items-center gap-3">
-                      <div className="w-8 h-8 rounded-full bg-cyan-500/10 flex items-center justify-center text-cyan-400">
-                        <User className="w-4 h-4" />
-                      </div>
-                      <div>
-                        <div className="text-sm font-medium text-white">{member.name || `User ${member.id}`}</div>
-                        <div className="text-xs text-slate-400">{member.email}</div>
-                      </div>
-                    </div>
+          ) : (
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              <section>
+                <h3 className="font-semibold mb-4">
+                  Current members ({members.length})
+                </h3>
+                {members.length === 0 ? (
+                  <p className="text-slate-400">No members yet.</p>
+                ) : (
+                  <ul className="space-y-3">
+                    {members.map((member) => (
+                      <li
+                        key={member.id}
+                        className="border border-slate-700 p-3 rounded-lg flex flex-wrap items-center justify-between gap-3"
+                      >
+                        <div className="min-w-0 break-all">
+                          <p className="text-white">{member.name}</p>
+                          <p className="text-sm text-slate-400">
+                            {member.email}
+                          </p>
+                        </div>
+                        <button
+                          className="btn-ghost text-red-300"
+                          disabled={adding || deleting}
+                          aria-label={`Remove ${member.name}`}
+                          onClick={() => setRemoving(member)}
+                        >
+                          Remove
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </section>
+              <section>
+                <h3 className="font-semibold mb-4">Add members</h3>
+                <label className="block text-sm mb-4">
+                  Search users
+                  <input
+                    className="admin-input mt-2"
+                    type="search"
+                    placeholder="Name or email"
+                    value={search}
+                    onChange={(e) => setSearch(e.target.value)}
+                  />
+                </label>
+                {usersLoading ? (
+                  <p role="status">Loading users…</p>
+                ) : usersError ? (
+                  <div role="alert">
+                    <p>Could not load users.</p>
                     <button
-                      onClick={() => handleRemoveUser(member.id)}
-                      className="p-1.5 rounded-lg text-slate-400 hover:text-red-400 hover:bg-red-400/10 transition-colors"
-                      title="Remove member"
+                      className="btn-ghost mt-3"
+                      onClick={() => refetchUsers()}
                     >
-                      <Trash2 className="w-4 h-4" />
+                      Retry
                     </button>
                   </div>
-                  );
-                })
-              )}
+                ) : available.length === 0 ? (
+                  <p className="text-slate-400">
+                    No matching users available to add.
+                  </p>
+                ) : (
+                  <ul className="space-y-3 max-h-96 overflow-y-auto">
+                    {available.map((user) => (
+                      <li
+                        key={user.id}
+                        className="border border-slate-700 p-3 rounded-lg flex flex-wrap items-center justify-between gap-3"
+                      >
+                        <div className="min-w-0 break-all">
+                          <p className="text-white">{user.name}</p>
+                          <p className="text-sm text-slate-400">{user.email}</p>
+                        </div>
+                        <button
+                          className="btn-ghost"
+                          disabled={adding || deleting}
+                          aria-label={`Add ${user.name}`}
+                          onClick={() => add(user.id, user.name)}
+                        >
+                          Add
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </section>
             </div>
-          </div>
-
-          {/* Right: Add Users */}
-          <div className="w-1/2 flex flex-col bg-slate-950/30">
-            <div className="p-4 border-b border-slate-800 bg-slate-900/30">
-              <h3 className="text-sm font-medium text-slate-300 mb-3">Add Users</h3>
-              <div className="relative">
-                <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500" />
-                <input
-                  type="text"
-                  placeholder="Search users..."
-                  value={searchTerm}
-                  onChange={(e) => setSearchTerm(e.target.value)}
-                  className="w-full pl-9 pr-4 py-2 bg-slate-950 border border-slate-800 rounded-lg text-sm text-slate-200 focus:outline-none focus:border-cyan-500/50 placeholder:text-slate-600"
-                />
-              </div>
-            </div>
-            <div className="flex-1 overflow-y-auto p-4 space-y-2">
-              {availableUsers.length === 0 ? (
-                <div className="text-center py-8 text-slate-500 italic">
-                  {searchTerm ? "No matching users found" : "No available users to add"}
-                </div>
-              ) : (
-                availableUsers.map((user) => (
-                  <div key={user.id} className="flex items-center justify-between p-3 rounded-xl bg-slate-800/30 border border-slate-800 hover:border-slate-700 hover:bg-slate-800/50 transition-all">
-                    <div className="overflow-hidden mr-2">
-                      <div className="text-sm font-medium text-slate-200 truncate">{user.name}</div>
-                      <div className="text-xs text-slate-500 truncate">{user.email}</div>
-                    </div>
-                    <button
-                      onClick={() => handleAddUser(user.id)}
-                      className="p-1.5 rounded-lg text-emerald-400 hover:bg-emerald-400/10 transition-colors shrink-0"
-                      title="Add to group"
-                    >
-                      <UserPlus className="w-4 h-4" />
-                    </button>
-                  </div>
-                ))
-              )}
-            </div>
-          </div>
-        </div>
+          )}
+          <ConfirmationModal
+            isOpen={Boolean(removing)}
+            onClose={() => setRemoving(null)}
+            title="Remove group member"
+            message={
+              <>
+                Remove <strong>{removing?.name}</strong> from {group?.name}?
+                They will lose access provided by this group.
+              </>
+            }
+            confirmText="Remove member"
+            isDestructive
+            onConfirm={async () => {
+              if (group && removing) {
+                await removeUser({
+                  groupId: group.id,
+                  userId: removing.id,
+                }).unwrap();
+                setMessage(`${removing.name} removed.`);
+              }
+            }}
+          />
+        </DialogPanel>
       </div>
-    </div>
+    </Dialog>
   );
 };

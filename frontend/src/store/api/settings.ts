@@ -1,5 +1,5 @@
-import { createApi } from '@reduxjs/toolkit/query/react';
-import { baseQueryWithReauth } from './baseQuery';
+import { createApi } from "@reduxjs/toolkit/query/react";
+import { baseQueryWithReauth } from "./baseQuery";
 
 export interface AppSetting {
   key: string;
@@ -10,21 +10,22 @@ export interface AppSetting {
 }
 
 export const settingsApi = createApi({
-  reducerPath: 'settingsApi',
+  reducerPath: "settingsApi",
   baseQuery: baseQueryWithReauth,
-  tagTypes: ['Settings'],
+  tagTypes: ["Settings"],
   endpoints: (builder) => ({
     getSettings: builder.query<AppSetting[], void>({
-      query: () => '/admin/settings',
-      providesTags: ['Settings'],
+      query: () => "/admin/settings",
+      transformResponse: (response: AppSetting[] | null) => response || [],
+      providesTags: ["Settings"],
     }),
     updateSetting: builder.mutation<AppSetting, Partial<AppSetting>>({
       query: (setting) => ({
-        url: '/admin/settings',
-        method: 'PUT',
+        url: "/admin/settings",
+        method: "PUT",
         body: setting,
       }),
-      invalidatesTags: ['Settings'],
+      invalidatesTags: ["Settings"],
     }),
   }),
 });

@@ -1,130 +1,88 @@
-import { useCallback, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
-import {
-  LogOut,
-  ChevronDown,
-  Shield,
-  Key,
-  Bell,
-  Settings,
-  User,
-} from "lucide-react";
+import { Menu, MenuButton, MenuItems, MenuItem } from "@headlessui/react";
+import { LogOut, ChevronDown, User } from "lucide-react";
+import { NavLink, Link, useNavigate } from "react-router-dom";
 import { useAppSelector } from "../store/store";
-import UserDropDownMenu, { dropDownProp } from "./UserDropDown";
-import { useNavigate } from "react-router-dom";
 import { useLogoutMutation } from "../store/api/auth";
+import { useNotificationContext } from "../hooks/useNotification";
 
 const Navbar = () => {
   const { t } = useTranslation(["components", "common"]);
-  const [userDropDown, setUserDropDown] = useState(false);
   const authData = useAppSelector((state) => state.authSlice);
   const navigate = useNavigate();
   const [logout] = useLogoutMutation();
+  const { showNotification } = useNotificationContext();
 
-  const logOutAction = useCallback(async () => {
+  const logOut = async () => {
     try {
       await logout().unwrap();
       navigate("/login", { replace: true });
-    } catch (error) {
-      console.error("Logout failed", error);
+    } catch {
+      showNotification("error", "Could not sign out. Please try again.");
     }
-  }, [logout, navigate]);
-
-  const adminNavigationAction = useCallback(() => {
-    navigate("/admin");
-  }, [navigate]);
-
-  const profileNavigationAction = useCallback(() => {
-    navigate("/profile");
-  }, [navigate]);
-
-  const dropDownPropArray: dropDownProp[] = useMemo(() => {
-    const props: dropDownProp[] = [
-      {
-        name: t("components:navbar.profile"),
-        icon: User,
-        action: profileNavigationAction,
-      },
-      {
-        name: t("components:navbar.logout"),
-        icon: LogOut,
-        action: logOutAction,
-      },
-    ];
-    if (authData.role === 'admin') {
-      props.push({
-        name: t("components:navbar.adminPanel"),
-        icon: Shield,
-        action: adminNavigationAction,
-        dividerTop: true,
-      });
-      props.push({
-        name: t("components:navbar.secrets"),
-        icon: Key,
-        action: () => navigate("/secrets"),
-      });
-      props.push({
-        name: t("components:navbar.webhooks"),
-        icon: Bell,
-        action: () => navigate("/webhooks"),
-      });
-      props.push({
-        name: t("components:navbar.settings"),
-        icon: Settings,
-        action: () => navigate("/admin/settings"),
-      });
-    }
-    return props;
-  }, [authData.role, logOutAction, adminNavigationAction, profileNavigationAction, navigate, t]);
-
-  const handleDropDown = () => {
-    setUserDropDown((prev) => !prev);
   };
 
   return (
-    <>
-      <nav className="glass-panel sticky top-0 z-50 transition-all duration-300">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="flex justify-between items-center h-16">
-            {/* Logo */}
-            <div className="flex-shrink-0">
-              <h1
-                onClick={() => navigate("/")}
-                className="text-2xl font-light text-white cursor-pointer hover:text-slate-300 transition-colors duration-200"
+    <header className="sticky top-0 z-40 border-b border-slate-800 bg-slate-950">
+      <div className="max-w-screen-2xl mx-auto px-4 sm:px-6 py-3 flex flex-wrap items-center justify-between gap-3">
+        <Link to="/" className="text-xl font-semibold text-white">
+          {t("common:appName")}
+        </Link>
+        <nav
+          aria-label="Main navigation"
+          className="flex gap-2 order-3 w-full sm:order-none sm:w-auto"
+        >
+          <NavLink
+            to="/"
+            end
+            className={({ isActive }) =>
+              `rounded-lg px-3 py-2 text-sm ${isActive ? "bg-slate-800 text-white" : "text-slate-300 hover:text-white"}`
+            }
+          >
+            Resources
+          </NavLink>
+          {authData.role === "admin" && (
+            <NavLink
+              to="/admin"
+              className={({ isActive }) =>
+                `rounded-lg px-3 py-2 text-sm ${isActive ? "bg-cyan-500/15 text-cyan-300" : "text-slate-300 hover:text-white"}`
+              }
+            >
+              Administration
+            </NavLink>
+          )}
+        </nav>
+        <Menu>
+          <MenuButton className="text-slate-300 hover:text-white text-sm flex items-center gap-2 p-2">
+            {authData.user || "Account"}
+            <ChevronDown className="h-4 w-4" aria-hidden="true" />
+          </MenuButton>
+          <MenuItems
+            anchor="bottom end"
+            className="z-50 w-48 rounded-lg border border-slate-600 bg-slate-900 p-1 shadow-xl [--anchor-gap:8px]"
+          >
+            <MenuItem>
+              <Link
+                to="/profile"
+                className="flex items-center gap-2 px-3 py-2 text-sm text-slate-200 rounded data-[focus]:bg-slate-800"
               >
-                {t("common:appName")}
-              </h1>
-            </div>
-
-            {/* Action Buttons */}
-            <div className="flex items-center space-x-6">
-              {/* User Menu */}
-              <div className="relative">
-                <button
-                  onClick={handleDropDown}
-                  className="text-slate-400 hover:text-white transition-colors duration-200 text-sm flex items-center gap-1"
-                >
-                  {authData.user || "admin"}
-                  <ChevronDown
-                    className={`h-3 w-3 transition-transform duration-200 ${userDropDown ? 'rotate-180' : ''}`}
-                    aria-hidden="true"
-                  />
-                </button>
-                {userDropDown && (
-                  <UserDropDownMenu
-                    isOpen={userDropDown}
-                    onClose={() => setUserDropDown(false)}
-                    dropDownPropArray={dropDownPropArray}
-                  />
-                )}
-              </div>
-            </div>
-          </div>
-        </div>
-
-      </nav>
-
-    </>
+                <User size={16} />
+                {t("components:navbar.profile")}
+              </Link>
+            </MenuItem>
+            <MenuItem>
+              <button
+                onClick={logOut}
+                className="flex w-full items-center gap-2 px-3 py-2 text-sm text-slate-200 rounded data-[focus]:bg-slate-800"
+              >
+                <LogOut size={16} />
+                {t("components:navbar.logout")}
+              </button>
+            </MenuItem>
+          </MenuItems>
+        </Menu>
+      </div>
+    </header>
   );
 };
 

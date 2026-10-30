@@ -1,5 +1,5 @@
 import { createApi } from "@reduxjs/toolkit/query/react";
-import { Space } from "../../types";
+import { Space, SpacePermission } from "../../types";
 import { baseQueryWithReauth } from "./baseQuery";
 
 export const spacesApiSlice = createApi({
@@ -10,6 +10,7 @@ export const spacesApiSlice = createApi({
     return {
       getSpaces: builder.query<Space[], void>({
         query: () => "/spaces",
+        transformResponse: (response: Space[] | null) => response || [],
         providesTags: ["Space"],
       }),
       getSpace: builder.query<Space, string>({
@@ -40,11 +41,16 @@ export const spacesApiSlice = createApi({
         invalidatesTags: ["Space"],
       }),
       // Permissions
-      getSpacePermissions: builder.query<import("../../types").SpacePermission[], string>({
+      getSpacePermissions: builder.query<SpacePermission[], string>({
         query: (spaceId) => `/spaces/${spaceId}/permissions`,
+        transformResponse: (response: SpacePermission[] | null) =>
+          response || [],
         providesTags: ["Space"], // Re-fetch on space changes or permission updates
       }),
-      addSpacePermission: builder.mutation<void, { spaceId: string; groupId?: string; userId?: string }>({
+      addSpacePermission: builder.mutation<
+        void,
+        { spaceId: string; groupId?: string; userId?: string }
+      >({
         query: ({ spaceId, ...body }) => ({
           url: `/spaces/${spaceId}/permissions`,
           method: "POST",
@@ -52,7 +58,10 @@ export const spacesApiSlice = createApi({
         }),
         invalidatesTags: ["Space"],
       }),
-      removeSpacePermission: builder.mutation<void, { spaceId: string; groupId?: string; userId?: string }>({
+      removeSpacePermission: builder.mutation<
+        void,
+        { spaceId: string; groupId?: string; userId?: string }
+      >({
         query: ({ spaceId, ...body }) => ({
           url: `/spaces/${spaceId}/permissions`,
           method: "DELETE",

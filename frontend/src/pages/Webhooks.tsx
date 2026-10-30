@@ -1,4 +1,5 @@
 import React, { useState } from "react";
+import ConfirmationModal from "../components/ConfirmationModal";
 import {
   Plus,
   Trash,
@@ -20,12 +21,19 @@ import {
 } from "../store/api/webhooks";
 
 const Webhooks = () => {
-  const { data: webhooks = [], isLoading, error } = useListWebhooksQuery();
+  const {
+    data: webhooks = [],
+    isLoading,
+    error,
+    refetch,
+  } = useListWebhooksQuery();
   const [createWebhook] = useCreateWebhookMutation();
   const [updateWebhook] = useUpdateWebhookMutation();
   const [deleteWebhook] = useDeleteWebhookMutation();
 
   const [showModal, setShowModal] = useState(false);
+  const [deleteId, setDeleteId] = useState<string | null>(null);
+  const [actionError, setActionError] = useState("");
   const [isEditing, setIsEditing] = useState(false);
   const [currentWebhook, setCurrentWebhook] = useState<
     Partial<Webhook> & { id?: string }
@@ -38,11 +46,14 @@ const Webhooks = () => {
   const [showLogsModal, setShowLogsModal] = useState(false);
   const [selectedWebhookId, setSelectedWebhookId] = useState<string>("");
   const [selectedWebhookName, setSelectedWebhookName] = useState("");
-  const { data: logs = [], isLoading: isLoadingLogs } =
-    useGetWebhookLogsQuery(selectedWebhookId, { skip: !showLogsModal });
+  const { data: logs = [], isLoading: isLoadingLogs } = useGetWebhookLogsQuery(
+    selectedWebhookId,
+    { skip: !showLogsModal },
+  );
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    setActionError("");
     try {
       let parsedHeaders = {};
       try {
@@ -53,7 +64,7 @@ const Webhooks = () => {
               : currentWebhook.headers;
         }
       } catch {
-        alert("Invalid JSON in Headers field");
+        setActionError("Headers must contain valid JSON.");
         return;
       }
 
@@ -68,7 +79,10 @@ const Webhooks = () => {
           ...payload,
         }).unwrap();
       } else {
-        await createWebhook(payload as Partial<Webhook> & Pick<Webhook, "name" | "url" | "method">).unwrap();
+        await createWebhook(
+          payload as Partial<Webhook> &
+            Pick<Webhook, "name" | "url" | "method">,
+        ).unwrap();
       }
 
       setShowModal(false);
@@ -78,23 +92,15 @@ const Webhooks = () => {
       const message =
         (err as { data?: { error?: string } })?.data?.error ||
         (err instanceof Error ? err.message : "Operation failed");
-      alert(message);
+      setActionError(message);
     }
   };
 
-  const handleDelete = async (id: string) => {
-    if (!confirm("Are you sure?")) return;
-    try {
-      await deleteWebhook(id).unwrap();
-    } catch (err: unknown) {
-      const message =
-        err instanceof Error ? err.message : "Failed to delete webhook";
-      alert(message);
-    }
-  };
+  const handleDelete = (id: string) => setDeleteId(id);
 
   const openEdit = (webhook: Webhook) => {
     setCurrentWebhook({ ...webhook });
+    setActionError("");
     setIsEditing(true);
     setShowModal(true);
   };
@@ -108,6 +114,7 @@ const Webhooks = () => {
       url: "",
       description: "",
     });
+    setActionError("");
     setIsEditing(false);
     setShowModal(true);
   };
@@ -119,8 +126,30 @@ const Webhooks = () => {
   };
 
   return (
-    <div className="min-h-screen bg-slate-950 text-slate-200 font-sans selection:bg-cyan-500/30">
-      <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+    <div>
+      <ConfirmationModal
+        isOpen={Boolean(deleteId)}
+        onClose={() => setDeleteId(null)}
+        title="Delete webhook"
+        message={
+          <>
+            Delete{" "}
+            <strong>
+              {webhooks.find((webhook) => webhook.id === deleteId)?.name}
+            </strong>
+            ? Events will no longer be delivered to this integration.
+          </>
+        }
+        confirmText="Delete webhook"
+        isDestructive
+        onConfirm={async () => {
+          if (deleteId) await deleteWebhook(deleteId).unwrap();
+        }}
+      />
+      <p className="text-sm text-slate-400 mb-2">
+        Administration / Integrations
+      </p>
+      <section aria-label="Webhook management">
         <div className="flex justify-between items-center mb-8">
           <div>
             <h1 className="text-3xl font-bold text-white tracking-tight flex items-center gap-3">
@@ -139,9 +168,16 @@ const Webhooks = () => {
           </button>
         </div>
 
-        {error && <div className="text-red-500 mb-4">Failed to load webhooks</div>}
+        {error && (
+          <div role="alert" className="admin-panel p-6 mb-4">
+            <p>Could not load webhooks.</p>
+            <button className="btn-ghost mt-3" onClick={() => refetch()}>
+              Retry
+            </button>
+          </div>
+        )}
 
-        {isLoading ? (
+        {error ? null : isLoading ? (
           <div className="text-white">Loading...</div>
         ) : (
           <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-3">
@@ -217,7 +253,7 @@ const Webhooks = () => {
             )}
           </div>
         )}
-      </main>
+      </section>
 
       {showModal && (
         <div className="fixed inset-0 z-50 overflow-y-auto">
@@ -245,7 +281,7 @@ const Webhooks = () => {
                       type="button"
                       onClick={() => {
                         navigator.clipboard.writeText(
-                          currentWebhook.signingSecret || ""
+                          currentWebhook.signingSecret || "",
                         );
                         setCopied(true);
                         setTimeout(() => setCopied(false), 2000);
@@ -268,6 +304,11 @@ const Webhooks = () => {
               )}
 
               <form onSubmit={handleSubmit} className="space-y-4">
+                {actionError && (
+                  <p role="alert" className="text-red-300">
+                    {actionError}
+                  </p>
+                )}
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <div>
                     <label className="block text-sm font-medium text-slate-300 mb-1">
@@ -433,9 +474,7 @@ const Webhooks = () => {
                 {isLoadingLogs ? (
                   <div className="text-slate-500">Loading logs...</div>
                 ) : logs.length === 0 ? (
-                  <div className="text-slate-500">
-                    No execution logs found.
-                  </div>
+                  <div className="text-slate-500">No execution logs found.</div>
                 ) : (
                   <LogsTable logs={logs} />
                 )}

@@ -35,6 +35,7 @@ export const webhooksApi = createApi({
   endpoints: (builder) => ({
     listWebhooks: builder.query<Webhook[], void>({
       query: () => "/webhooks",
+      transformResponse: (response: Webhook[] | null) => response || [],
       providesTags: ["Webhook"],
     }),
     createWebhook: builder.mutation<
@@ -61,6 +62,7 @@ export const webhooksApi = createApi({
     }),
     getWebhookLogs: builder.query<WebhookLog[], string>({
       query: (webhookId) => `/webhooks/${webhookId}/logs`,
+      transformResponse: (response: WebhookLog[] | null) => response || [],
       providesTags: ["WebhookLog"],
     }),
     getResourceWebhooks: builder.query<AssignedWebhook[], string>({

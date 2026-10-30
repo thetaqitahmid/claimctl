@@ -10,23 +10,46 @@ claimctl is designed to be easily deployed using Docker and Docker Compose.
 
 ## Quick Start (Development)
 
-To run the full stack (Frontend + Backend + Database) locally:
+Run these commands from the repository root. Source development requires
+Go, Node.js with npm, Bash 4.3 or later, OpenSSL, Make, Docker Engine, and the
+Docker Compose plugin.
 
 ```bash
 make dev_up
 ```
 
-This command uses `docker-compose.yml` to spin up:
+On first use, the command creates a private `backend/.env` with a generated
+administrator password and encryption key. Open that file to find
+`ADMIN_PASSWORD`, then sign in as `admin@example.com`. Existing configuration
+is never overwritten. Bootstrap credentials do not reset an existing account.
 
-- Postgres Database (Port 5432)
-- Backend API (Port 3000)
-- Frontend App (Port 5173/80)
+The command starts PostgreSQL using `tests/db/postgres-compose.yaml`, waits
+for its health check, installs frontend dependencies when needed, and builds
+the backend. The backend applies migrations to the database configured in
+`backend/.env` and creates the initial administrator and default space.
+Startup does not insert mock data or require the `migrate` or `psql` CLIs.
 
-To stop the environment:
+The services are available at:
+
+1. PostgreSQL: `127.0.0.1:5432`
+2. Backend: `http://localhost:3000`
+3. Frontend: `http://localhost:5173`
+
+Keep `DATABASE_URL` in `backend/.env` consistent with the database you intend
+to use. The generated default matches the local Compose database. Ensure
+ports 5432, 3000, and 5173 are free before starting. Vite fails rather than
+silently switching ports, which would break the configured origin policy.
+
+Press Ctrl+C to stop both application processes. If either process fails,
+the other is also stopped. PostgreSQL remains running for the next startup.
+To stop the database container afterward:
 
 ```bash
 make dev_down
 ```
+
+For container based evaluation without installing Go or Node.js, use the
+[README instructions](../README.md#try-it-locally) instead.
 
 ## Docker Compose Deployment
 
@@ -95,11 +118,10 @@ environments.
 
 ### Seeding
 
-To populate the database with initial test data:
-
-```bash
-psql "postgresql://..." -f backend/database/seed.sql
-```
+The development startup deliberately does not seed sample users, secrets,
+webhooks, or reservations. Create resources through the UI after signing in.
+The historical fixture in `tests/db-mock-data/seed.sql` is not run during
+startup and should not be applied to an existing development database.
 
 ## Kubernetes Deployment (Helm)
 
@@ -121,8 +143,9 @@ application to Kubernetes.
   of relying on the chart `appVersion`.
 - Enable TLS on the Ingress (`ingress.tls`) and terminate HTTPS at the
   ingress controller.
-- Scale out: `replicaCount: 3` or enable autoscaling, add a `PodDisruptionBudget`
-  (prefer `maxUnavailable`), and configure `topologySpreadConstraints` /
+- Scale out: `replicaCount: 3` or enable autoscaling, add a
+  `PodDisruptionBudget` (prefer `maxUnavailable`), and configure
+  `topologySpreadConstraints` /
   pod anti-affinity.
 - Enable `networkPolicy.enabled` and configure the
   `networkPolicy.ingressController` selector for your ingress controller.
@@ -150,7 +173,8 @@ application to Kubernetes.
      name: "claimctl"
      existingSecret: "my-db-secret"
      existingSecretUserKey: "db-user" # Optional, defaults to "db-user"
-     existingSecretPasswordKey: "db-password" # Optional, defaults to "db-password"
+     # Optional, defaults to "db-password"
+     existingSecretPasswordKey: "db-password"
    ```
 
 **Without an existing secret** the chart creates a

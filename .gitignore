@@ -2,6 +2,7 @@ charts/claimctl/charts/
 
 # Backend
 backend/.env
+backend/main
 backend/secrets/
 backend/keys/
 

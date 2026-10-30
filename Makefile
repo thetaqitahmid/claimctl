@@ -1,31 +1,38 @@
-.PHONY: backend_up backend_down frontend_up dev_up dev_down db_up db_down test test_integration test_deployment test_cli_terminal helm_lint
+.PHONY: backend_up backend_down frontend_up frontend_deps dev_init dev_up dev_down db_up db_down test test_integration test_deployment test_cli_terminal test_dev_start helm_lint
 
-db_up:
-	@docker compose -f tests/db/postgres-compose.yaml up -d
+dev_init:
+	@bash deployment/dev-env.sh
+
+db_up: dev_init
+	@docker compose -f tests/db/postgres-compose.yaml up -d --wait --wait-timeout 90
 
 db_down:
 	@docker compose -f tests/db/postgres-compose.yaml down
 
-backend_up:
-	@make db_up
-	@sleep 5
-	@bash -c "source ./backend/.env && cd backend && migrate --path migrations -database \"postgresql://devuser:devpass@127.0.0.1:5432/devdb?sslmode=disable\" up"
-	@bash -c "psql postgresql://devuser:devpass@127.0.0.1:5432/devdb -f ./tests/db-mock-data/seed.sql"
-	@bash -c "set -a && source ./backend/.env && set +a && cd backend && go build -o main cmd/main.go && ./main"
+backend_up: db_up
+	@bash -ec 'set -a; source ./backend/.env; set +a; cd backend; go build -o main cmd/main.go && exec ./main'
 
 backend_down:
-	@make db_down
+	@$(MAKE) db_down
 	@rm -f backend/main
 
-frontend_up:
-	@cd frontend && npm run dev
+frontend/node_modules/.package-lock.json: frontend/package-lock.json frontend/package.json
+	@cd frontend && npm ci
+
+frontend_deps: frontend/node_modules/.package-lock.json
+
+frontend_up: frontend_deps
+	@cd frontend && npm run dev -- --strictPort
 
 dev_up:
-	@make -j2 backend_up frontend_up
+	@MAKE="$(MAKE)" bash deployment/dev-up.sh
 
 dev_down: backend_down
 
-test: helm_lint
+test_dev_start:
+	@python3 deployment/dev-start_test.py
+
+test: helm_lint test_dev_start
 	@cd backend && go test ./...
 	@cd frontend && npm run lint && npm run test && npm run build
 	@cd cli && go test ./...
@@ -50,11 +57,12 @@ test_deployment: helm_lint
 test_cli_terminal:
 	@python3 cli/tests/exec_pty_test.py
 
-migrate_up:
-	@bash -c "source ./backend/.env && cd backend && migrate --path migrations -database \"postgresql://devuser:devpass@127.0.0.1:5432/devdb?sslmode=disable\" up"
+migrate_up: dev_init
+	@bash -ec 'source ./backend/.env; cd backend; migrate --path migrations -database "$$DATABASE_URL" up'
 
-migrate_force:
-	@bash -c "source ./backend/.env && cd backend && migrate --path migrations -database \"postgresql://devuser:devpass@127.0.0.1:5432/devdb?sslmode=disable\" force $(VERSION)"
+migrate_force: dev_init
+	@test -n "$(VERSION)" || { echo "Set VERSION to the required migration version" >&2; exit 1; }
+	@bash -ec 'source ./backend/.env; cd backend; migrate --path migrations -database "$$DATABASE_URL" force "$(VERSION)"'
 
 sqlc:
 	@cd backend && sqlc generate

@@ -172,17 +172,20 @@ func (m *MockQuerier) FindUserReservationForResource(ctx context.Context, arg db
 	return args.Get(0).(db.ClaimctlReservation), args.Error(1)
 }
 
-func (m *MockQuerier) ActivateReservation(ctx context.Context, arg db.ActivateReservationParams) error {
+func (m *MockQuerier) ActivateReservation(ctx context.Context, arg uuid.UUID) (int64, error) {
+	args := m.Called(ctx, arg)
+	if err := args.Error(0); err != nil {
+		return 0, err
+	}
+	return 1, nil
+}
+
+func (m *MockQuerier) CompleteReservation(ctx context.Context, arg uuid.UUID) error {
 	args := m.Called(ctx, arg)
 	return args.Error(0)
 }
 
-func (m *MockQuerier) CompleteReservation(ctx context.Context, arg db.CompleteReservationParams) error {
-	args := m.Called(ctx, arg)
-	return args.Error(0)
-}
-
-func (m *MockQuerier) CancelReservation(ctx context.Context, arg db.CancelReservationParams) error {
+func (m *MockQuerier) CancelReservation(ctx context.Context, arg uuid.UUID) error {
 	args := m.Called(ctx, arg)
 	return args.Error(0)
 }
@@ -283,7 +286,7 @@ func (m *MockQuerier) GetUserReservationHistory(ctx context.Context, userID uuid
 	return args.Get(0).([]db.GetUserReservationHistoryRow), args.Error(1)
 }
 
-func (m *MockQuerier) PromoteNextInQueue(ctx context.Context, arg db.PromoteNextInQueueParams) error {
+func (m *MockQuerier) PromoteNextInQueue(ctx context.Context, arg uuid.UUID) error {
 	args := m.Called(ctx, arg)
 	return args.Error(0)
 }
@@ -298,7 +301,7 @@ func (m *MockQuerier) GetQueueForResource(ctx context.Context, resourceID uuid.U
 	return args.Get(0).([]db.GetQueueForResourceRow), args.Error(1)
 }
 
-func (m *MockQuerier) ExpireReservation(ctx context.Context, arg db.ExpireReservationParams) error {
+func (m *MockQuerier) ExpireReservation(ctx context.Context, arg uuid.UUID) error {
 	args := m.Called(ctx, arg)
 	return args.Error(0)
 }
@@ -371,7 +374,7 @@ func (m *MockQuerier) AddResourceWebhook(ctx context.Context, arg db.AddResource
 	return args.Error(0)
 }
 
-func (m *MockQuerier) CancelAllReservationsForResource(ctx context.Context, arg db.CancelAllReservationsForResourceParams) error {
+func (m *MockQuerier) CancelAllReservationsForResource(ctx context.Context, arg uuid.UUID) error {
 	args := m.Called(ctx, arg)
 	return args.Error(0)
 }

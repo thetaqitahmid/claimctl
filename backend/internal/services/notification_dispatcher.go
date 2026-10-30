@@ -51,7 +51,7 @@ func (d *EmailDispatcher) Dispatch(ctx context.Context, recipient string, payloa
 		"%s\r\n", recipient, payload.Subject, payload.Message))
 
 	addr := fmt.Sprintf("%s:%s", host, port)
-	err := smtp.SendMail(addr, auth, from, []string{recipient}, msg)
+	err := sendSMTP(ctx, addr, host, auth, from, []string{recipient}, msg)
 	if err != nil {
 		return fmt.Errorf("failed to send email: %w", err)
 	}

@@ -22,7 +22,7 @@ VALUES ($1, $2,
         WHEN (
             SELECT COUNT(*) FROM claimctl.reservations
             WHERE resource_id = $1 AND status IN ('pending', 'active')
-        ) = 0 THEN EXTRACT(EPOCH FROM NOW())::BIGINT
+        ) = 0 THEN FLOOR(EXTRACT(EPOCH FROM statement_timestamp()))::BIGINT
         ELSE NULL
     END,
     $3,
@@ -33,7 +33,7 @@ VALUES ($1, $2,
         ) = 0 AND $3::INTERVAL IS NOT NULL THEN NOW() + $3::INTERVAL
         ELSE NULL
     END,
-    EXTRACT(EPOCH FROM NOW())::BIGINT
+    FLOOR(EXTRACT(EPOCH FROM statement_timestamp()))::BIGINT
 )
 RETURNING *;
 
@@ -67,24 +67,27 @@ JOIN claimctl.resources res ON r.resource_id = res.id
 WHERE r.user_id=$1 AND r.status IN ('pending', 'active')
 ORDER BY r.created_at;
 
--- name: ActivateReservation :exec
+-- name: ActivateReservation :execrows
 UPDATE claimctl.reservations
 SET
     status='active',
-    start_time=$2,
-    scheduled_end_time = CASE WHEN duration IS NOT NULL THEN (to_timestamp($3) + duration) ELSE NULL END,
+    start_time=FLOOR(EXTRACT(EPOCH FROM statement_timestamp()))::BIGINT,
+    scheduled_end_time = LEAST(CASE WHEN duration IS NOT NULL THEN (statement_timestamp() + duration) ELSE NULL END, hard_end_time),
     queue_position=0,
-    updated_at=$4
-WHERE id=$1 AND status='pending';
+    updated_at=FLOOR(EXTRACT(EPOCH FROM statement_timestamp()))::BIGINT
+WHERE claimctl.reservations.id=$1 AND claimctl.reservations.status='pending'
+    AND (lease_expires_at IS NULL OR lease_expires_at > statement_timestamp())
+    AND (hard_end_time IS NULL OR hard_end_time > statement_timestamp())
+    AND NOT EXISTS (SELECT 1 FROM claimctl.reservations active WHERE active.resource_id=claimctl.reservations.resource_id AND active.status='active');
 
 -- name: CompleteReservation :exec
 UPDATE claimctl.reservations
-SET status='completed', end_time=$2, updated_at=$3
+SET status='completed', end_time=GREATEST(start_time, FLOOR(EXTRACT(EPOCH FROM statement_timestamp()))::BIGINT), updated_at=FLOOR(EXTRACT(EPOCH FROM statement_timestamp()))::BIGINT
 WHERE id=$1 AND status='active';
 
 -- name: CancelReservation :exec
 UPDATE claimctl.reservations
-SET status='cancelled', end_time=$2, queue_position=NULL, updated_at=$3
+SET status='cancelled', end_time=GREATEST(start_time, FLOOR(EXTRACT(EPOCH FROM statement_timestamp()))::BIGINT), queue_position=NULL, updated_at=FLOOR(EXTRACT(EPOCH FROM statement_timestamp()))::BIGINT
 WHERE id=$1 AND status IN ('pending', 'active');
 
 -- name: GetNextInQueue :one
@@ -95,13 +98,13 @@ LIMIT 1;
 
 -- name: PromoteNextInQueue :exec
 UPDATE claimctl.reservations r
-SET queue_position = queue_position - 1, updated_at = $2
+SET queue_position = queue_position - 1, updated_at = FLOOR(EXTRACT(EPOCH FROM statement_timestamp()))::BIGINT
 WHERE r.resource_id=$1 AND r.status='pending' AND r.queue_position > 1;
 
 -- name: UpdateQueuePositions :exec
 UPDATE claimctl.reservations r
-SET queue_position = queue_position - 1, updated_at = $2
-WHERE r.resource_id=$1 AND r.status='pending' AND r.queue_position > $3;
+SET queue_position = queue_position - 1, updated_at = FLOOR(EXTRACT(EPOCH FROM statement_timestamp()))::BIGINT
+WHERE r.resource_id=$1 AND r.status='pending' AND r.queue_position > $2;
 
 -- name: FindAllReservations :many
 SELECT r.*, u.name as user_name, res.name as resource_name
@@ -141,15 +144,18 @@ WHERE id=$1;
 
 -- name: FindExpiredActiveReservations :many
 SELECT * FROM claimctl.reservations
-WHERE status='active' AND scheduled_end_time IS NOT NULL AND scheduled_end_time < NOW();
+WHERE status IN ('active', 'pending') AND
+    (scheduled_end_time <= statement_timestamp() OR lease_expires_at <= statement_timestamp()
+        OR hard_end_time <= statement_timestamp())
+ORDER BY resource_id, id LIMIT 1000;
 
 -- name: ExpireReservation :exec
 UPDATE claimctl.reservations
-SET status='completed', end_time=EXTRACT(EPOCH FROM NOW())::BIGINT, updated_at=$2
+SET status='completed', end_time=GREATEST(start_time, FLOOR(EXTRACT(EPOCH FROM statement_timestamp()))::BIGINT), updated_at=FLOOR(EXTRACT(EPOCH FROM statement_timestamp()))::BIGINT
 WHERE id=$1;
 
 -- name: GetQueueForResource :many
-SELECT r.id, r.user_id, r.status, r.queue_position, r.start_time, r.end_time, r.scheduled_end_time, r.created_at, r.duration, u.name as user_name, u.email as user_email
+SELECT r.id, r.user_id, r.status, r.queue_position, r.start_time, r.end_time, r.scheduled_end_time, r.created_at, r.duration, r.lease_expires_at, r.hard_end_time, u.name as user_name, u.email as user_email
 FROM claimctl.reservations r
 JOIN claimctl.users u ON r.user_id = u.id
 WHERE r.resource_id=$1 AND r.status IN ('active', 'pending')
@@ -162,5 +168,5 @@ ORDER BY
 
 -- name: CancelAllReservationsForResource :exec
 UPDATE claimctl.reservations
-SET status='cancelled', end_time=$2, queue_position=NULL, updated_at=$2
+SET status='cancelled', end_time=GREATEST(start_time, FLOOR(EXTRACT(EPOCH FROM statement_timestamp()))::BIGINT), queue_position=NULL, updated_at=FLOOR(EXTRACT(EPOCH FROM statement_timestamp()))::BIGINT
 WHERE resource_id=$1 AND status IN ('pending', 'active');

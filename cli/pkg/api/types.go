@@ -52,32 +52,40 @@ func (r *ResourceWithStatus) ToCLIResource() Resource {
 
 // Reservation represents a booking.
 type Reservation struct {
-	ID               string    `json:"id"`
-	ResourceID       string    `json:"resourceId"`
-	UserID           string    `json:"userId"`
-	Status           string    `json:"status"`
-	QueuePosition    *int32    `json:"queuePosition,omitempty"`
-	StartTime        int64     `json:"startTime"`
-	EndTime          int64     `json:"endTime"`
-	CreatedAt        int64     `json:"createdAt"`
-	UpdatedAt        int64     `json:"updatedAt"`
-	ScheduledEndTime time.Time `json:"scheduledEndTime"`
-	Duration         any       `json:"duration,omitempty"`
+	ID               string     `json:"id"`
+	ResourceID       string     `json:"resourceId"`
+	UserID           string     `json:"userId"`
+	Status           string     `json:"status"`
+	QueuePosition    *int32     `json:"queuePosition"`
+	StartTime        *int64     `json:"startTime"`
+	EndTime          *int64     `json:"endTime"`
+	CreatedAt        int64      `json:"createdAt"`
+	UpdatedAt        int64      `json:"updatedAt"`
+	ScheduledEndTime *time.Time `json:"scheduledEndTime"`
+	LeaseExpiresAt   *time.Time `json:"leaseExpiresAt"`
+	HardEndTime      *time.Time `json:"hardEndTime"`
+	LeaseDuration    any        `json:"leaseDuration"`
+	Duration         any        `json:"duration"`
 }
 
 // UserReservation matches the enriched reservation row from the API.
 type UserReservation struct {
-	ID            string `json:"id"`
-	ResourceID    string `json:"resourceId"`
-	UserID        string `json:"userId"`
-	Status        string `json:"status"`
-	QueuePosition *int32 `json:"queuePosition"`
-	StartTime     int64  `json:"startTime"`
-	EndTime       int64  `json:"endTime"`
-	CreatedAt     int64  `json:"createdAt"`
-	ResourceName  string `json:"resourceName"`
-	ResourceType  string `json:"resourceType"`
-	Duration      any    `json:"duration"`
+	UpdatedAt        int64      `json:"updatedAt"`
+	ScheduledEndTime *time.Time `json:"scheduledEndTime"`
+	LeaseDuration    any        `json:"leaseDuration"`
+	LeaseExpiresAt   *time.Time `json:"leaseExpiresAt"`
+	HardEndTime      *time.Time `json:"hardEndTime"`
+	ID               string     `json:"id"`
+	ResourceID       string     `json:"resourceId"`
+	UserID           string     `json:"userId"`
+	Status           string     `json:"status"`
+	QueuePosition    *int32     `json:"queuePosition"`
+	StartTime        *int64     `json:"startTime"`
+	EndTime          *int64     `json:"endTime"`
+	CreatedAt        int64      `json:"createdAt"`
+	ResourceName     string     `json:"resourceName"`
+	ResourceType     string     `json:"resourceType"`
+	Duration         any        `json:"duration"`
 }
 
 // CreateReservationRequest is the payload for creating a reservation.
@@ -130,7 +138,6 @@ type UpdateResourceRequest struct {
 	Labels     []string               `json:"labels,omitempty"`
 	Properties map[string]interface{} `json:"properties,omitempty"`
 }
-
 
 // Secret matches the secret object from the API.
 type Secret struct {
@@ -213,19 +220,23 @@ type GroupMember struct {
 
 // APIToken represents an API token record.
 type APIToken struct {
-	ID        string  `json:"id"`
-	Name      string  `json:"name"`
-	CreatedAt int64   `json:"createdAt"`
-	ExpiresAt *int64  `json:"expiresAt,omitempty"`
+	Scopes    []string `json:"scopes"`
+	SpaceIDs  []string `json:"spaceIds"`
+	ID        string   `json:"id"`
+	Name      string   `json:"name"`
+	CreatedAt int64    `json:"createdAt"`
+	ExpiresAt *int64   `json:"expiresAt,omitempty"`
 }
 
 // GenerateTokenResponse is returned when a token is created.
 type GenerateTokenResponse struct {
-	Token     string  `json:"token"`
-	ID        string  `json:"id"`
-	Name      string  `json:"name"`
-	CreatedAt int64   `json:"createdAt"`
-	ExpiresAt *int64  `json:"expiresAt,omitempty"`
+	Scopes    []string `json:"scopes"`
+	SpaceIDs  []string `json:"spaceIds"`
+	Token     string   `json:"token"`
+	ID        string   `json:"id"`
+	Name      string   `json:"name"`
+	CreatedAt int64    `json:"createdAt"`
+	ExpiresAt *int64   `json:"expiresAt,omitempty"`
 }
 
 // AuditLog represents a single audit log entry.
@@ -243,26 +254,26 @@ type AuditLog struct {
 
 // ReservationHistory represents a single reservation history entry.
 type ReservationHistory struct {
-	ID           string `json:"id"`
-	ResourceID   string `json:"resourceId"`
-	ResourceName string `json:"resourceName"`
+	ID            string  `json:"id"`
+	ResourceID    string  `json:"resourceId"`
+	ResourceName  string  `json:"resourceName"`
 	ReservationID *string `json:"reservationId"`
-	Action       string `json:"action"`
-	Timestamp    int64  `json:"timestamp"`
-	Details      string `json:"details"`
-	UserName     string `json:"userName,omitempty"`
+	Action        string  `json:"action"`
+	Timestamp     int64   `json:"timestamp"`
+	Details       string  `json:"details"`
+	UserName      string  `json:"userName,omitempty"`
 }
 
 // MaintenanceHistory represents a single maintenance history entry.
 type MaintenanceHistory struct {
-	ID            string `json:"id"`
-	ResourceID    string `json:"resourceId"`
-	PreviousState bool   `json:"previousState"`
-	NewState      bool   `json:"newState"`
-	ChangedBy     string `json:"changedBy"`
+	ID             string `json:"id"`
+	ResourceID     string `json:"resourceId"`
+	PreviousState  bool   `json:"previousState"`
+	NewState       bool   `json:"newState"`
+	ChangedBy      string `json:"changedBy"`
 	ChangedByEmail string `json:"changedByEmail"`
-	ChangedAt     int64  `json:"changedAt"`
-	Reason        string `json:"reason,omitempty"`
+	ChangedAt      int64  `json:"changedAt"`
+	Reason         string `json:"reason,omitempty"`
 }
 
 // UpdateWebhookRequest is the payload for updating a webhook.

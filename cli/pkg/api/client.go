@@ -2,6 +2,7 @@ package api
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -9,8 +10,8 @@ import (
 	"net/http"
 	"net/url"
 	"os"
-	"os/user"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/bgentry/go-netrc/netrc"
@@ -22,22 +23,29 @@ type Client struct {
 	HttpClient *http.Client
 	RetryCount int
 	RetryWait  time.Duration
+	Context    context.Context
 }
 
 func NewClient(baseURL, token string, useNetrc bool) (*Client, error) {
+	u, err := url.Parse(baseURL)
+	if err != nil || u.Hostname() == "" || (u.Scheme != "http" && u.Scheme != "https") || u.User != nil || u.RawQuery != "" || u.Fragment != "" {
+		return nil, fmt.Errorf("server URL must be an absolute HTTP(S) URL without credentials, query or fragment")
+	}
 	client := &Client{
-		BaseURL:    baseURL,
+		BaseURL:    strings.TrimRight(baseURL, "/"),
+		Context:    context.Background(),
 		Token:      token,
-		HttpClient: &http.Client{Timeout: 30 * time.Second},
+		HttpClient: &http.Client{Timeout: 30 * time.Second, CheckRedirect: func(req *http.Request, via []*http.Request) error { return http.ErrUseLastResponse }},
 		RetryCount: 3,
 		RetryWait:  1 * time.Second,
 	}
 
 	if client.Token == "" && useNetrc {
 		tokenFromNetrc, err := getTokenFromNetrc(baseURL)
-		if err == nil && tokenFromNetrc != "" {
-			client.Token = tokenFromNetrc
+		if err != nil {
+			return nil, err
 		}
+		client.Token = tokenFromNetrc
 	}
 
 	return client, nil
@@ -50,15 +58,20 @@ func getTokenFromNetrc(serverURL string) (string, error) {
 	}
 	host := u.Hostname()
 
-	usr, err := user.Current()
+	home, err := os.UserHomeDir()
 	if err != nil {
 		return "", err
 	}
-	netrcPath := filepath.Join(usr.HomeDir, ".netrc")
-
-	// check if file exists
-	if _, err := os.Stat(netrcPath); os.IsNotExist(err) {
-		return "", nil // no netrc, not an error
+	netrcPath := filepath.Join(home, ".netrc")
+	info, err := os.Stat(netrcPath)
+	if os.IsNotExist(err) {
+		return "", nil
+	}
+	if err != nil {
+		return "", err
+	}
+	if !info.Mode().IsRegular() || info.Mode().Perm()&0077 != 0 {
+		return "", fmt.Errorf(".netrc requires owner-only permissions")
 	}
 
 	n, err := netrc.ParseFile(netrcPath)
@@ -75,62 +88,7 @@ func getTokenFromNetrc(serverURL string) (string, error) {
 }
 
 func (c *Client) request(method, path string, body interface{}) ([]byte, error) {
-	var resp *http.Response
-
-	for i := 0; i <= c.RetryCount; i++ {
-		var bodyReader io.Reader
-		if body != nil {
-			// Re-create reader for each attempt
-			jsonBody, err := json.Marshal(body)
-			if err != nil {
-				return nil, fmt.Errorf("failed to marshal request body: %w", err)
-			}
-			bodyReader = bytes.NewBuffer(jsonBody)
-		}
-
-		req, err := http.NewRequest(method, c.BaseURL+path, bodyReader)
-		if err != nil {
-			return nil, fmt.Errorf("failed to create request: %w", err)
-		}
-
-		req.Header.Set("Content-Type", "application/json")
-		if c.Token != "" {
-			req.Header.Set("Authorization", "Bearer "+c.Token)
-		}
-
-		resp, err = c.HttpClient.Do(req)
-		if err == nil && resp.StatusCode < 500 {
-			// Success or non-retryable error (4xx)
-			break
-		}
-
-		// If it's the last attempt, return the error
-		if i == c.RetryCount {
-			if err != nil {
-				return nil, fmt.Errorf("request failed after %d retries: %w", c.RetryCount, err)
-			}
-			// If we got here, it means err was nil but StatusCode >= 500
-			// We'll let the status code check below handle it
-			break
-		}
-
-		// Wait before retrying (exponential backoff)
-		sleepTime := c.RetryWait * time.Duration(1<<i)
-		time.Sleep(sleepTime)
-	}
-
-	defer resp.Body.Close()
-
-	respBody, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, fmt.Errorf("failed to read response body: %w", err)
-	}
-
-	if resp.StatusCode >= 400 {
-		return nil, fmt.Errorf("api error: %s (status: %d)", string(respBody), resp.StatusCode)
-	}
-
-	return respBody, nil
+	return c.requestHeaders(method, path, body, nil)
 }
 
 func (c *Client) GetResources(labelExpr string) ([]Resource, error) {
@@ -424,46 +382,7 @@ func (c *Client) GetReservation(id string) (*Reservation, error) {
 }
 
 func (c *Client) WaitForReservation(id string, timeout, interval int, progressFn func(status string, queuePos *int32)) error {
-	elapsed := 0
-
-	for elapsed < timeout {
-		reservation, err := c.GetReservation(id)
-		if err != nil {
-			return fmt.Errorf("failed to get reservation status: %w", err)
-		}
-
-		// Call progress callback if provided
-		if progressFn != nil {
-			progressFn(reservation.Status, reservation.QueuePosition)
-		}
-
-		// Check if reservation is active
-		if reservation.Status == "active" {
-			return nil
-		}
-
-		// Check if reservation was cancelled or completed
-		if reservation.Status == "cancelled" || reservation.Status == "completed" {
-			return fmt.Errorf("reservation was %s", reservation.Status)
-		}
-
-		// Wait before next poll
-		if elapsed+interval > timeout {
-			// Don't sleep past timeout
-			break
-		}
-
-		// Sleep for interval (in seconds)
-		sleepDuration := interval
-		if elapsed+interval > timeout {
-			sleepDuration = timeout - elapsed
-		}
-
-		time.Sleep(time.Duration(sleepDuration) * time.Second)
-		elapsed += interval
-	}
-
-	return fmt.Errorf("timeout waiting for reservation to become active")
+	return c.waitForReservation(id, timeout, interval, progressFn)
 }
 
 // Space Methods
@@ -711,7 +630,7 @@ func (c *Client) RestoreBackup(data []byte) error {
 		return fmt.Errorf("failed to close writer: %w", err)
 	}
 
-	req, err := http.NewRequest("POST", c.BaseURL+"/api/admin/restore", body)
+	req, err := http.NewRequestWithContext(c.context(), "POST", c.BaseURL+"/api/admin/restore", body)
 	if err != nil {
 		return fmt.Errorf("failed to create request: %w", err)
 	}
@@ -726,13 +645,15 @@ func (c *Client) RestoreBackup(data []byte) error {
 	}
 	defer resp.Body.Close()
 
-	respBody, err := io.ReadAll(resp.Body)
+	respBody, err := io.ReadAll(io.LimitReader(resp.Body, maxResponseBytes+1))
 	if err != nil {
-		return fmt.Errorf("failed to read response: %w", err)
+		return err
 	}
-
-	if resp.StatusCode >= 400 {
-		return fmt.Errorf("restore failed: %s (status: %d)", string(respBody), resp.StatusCode)
+	if len(respBody) > maxResponseBytes {
+		return fmt.Errorf("response exceeds size limit")
+	}
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return &APIError{StatusCode: resp.StatusCode, Body: string(respBody)}
 	}
 
 	return nil

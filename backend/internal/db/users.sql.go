@@ -159,6 +159,34 @@ func (q *Queries) FindUserById(ctx context.Context, id uuid.UUID) (ClaimctlUser,
 	return i, err
 }
 
+const findUserByIdForUpdate = `-- name: FindUserByIdForUpdate :one
+SELECT id, email, name, password, created_at, updated_at, role, status, last_login, failed_login_attempts, locked_until, slack_destination, teams_webhook_url, notification_email, auth_provider, oidc_subject FROM claimctl.users WHERE id=$1 FOR UPDATE
+`
+
+func (q *Queries) FindUserByIdForUpdate(ctx context.Context, id uuid.UUID) (ClaimctlUser, error) {
+	row := q.db.QueryRow(ctx, findUserByIdForUpdate, id)
+	var i ClaimctlUser
+	err := row.Scan(
+		&i.ID,
+		&i.Email,
+		&i.Name,
+		&i.Password,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.Role,
+		&i.Status,
+		&i.LastLogin,
+		&i.FailedLoginAttempts,
+		&i.LockedUntil,
+		&i.SlackDestination,
+		&i.TeamsWebhookUrl,
+		&i.NotificationEmail,
+		&i.AuthProvider,
+		&i.OidcSubject,
+	)
+	return i, err
+}
+
 const findUserByOIDCSubject = `-- name: FindUserByOIDCSubject :one
 SELECT id, email, name, password, created_at, updated_at, role, status, last_login, failed_login_attempts, locked_until, slack_destination, teams_webhook_url, notification_email, auth_provider, oidc_subject FROM claimctl.users WHERE oidc_subject=$1
 `

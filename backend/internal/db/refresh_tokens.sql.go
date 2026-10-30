@@ -46,8 +46,13 @@ func (q *Queries) CreateRefreshToken(ctx context.Context, arg CreateRefreshToken
 }
 
 const deleteExpiredRefreshTokens = `-- name: DeleteExpiredRefreshTokens :exec
-DELETE FROM claimctl.refresh_tokens
-WHERE expires_at < NOW()
+DELETE FROM claimctl.refresh_tokens AS expired
+WHERE expired.expires_at < NOW()
+  AND NOT EXISTS (
+    SELECT 1 FROM claimctl.refresh_tokens AS family
+    WHERE family.family_id = expired.family_id
+      AND family.expires_at >= NOW()
+  )
 `
 
 func (q *Queries) DeleteExpiredRefreshTokens(ctx context.Context) error {
@@ -85,6 +90,27 @@ func (q *Queries) GetRefreshTokenByHash(ctx context.Context, tokenHash string) (
 	return i, err
 }
 
+const getRefreshTokenByHashForUpdate = `-- name: GetRefreshTokenByHashForUpdate :one
+SELECT id, user_id, token_hash, family_id, expires_at, revoked, created_at FROM claimctl.refresh_tokens
+WHERE token_hash = $1
+FOR UPDATE
+`
+
+func (q *Queries) GetRefreshTokenByHashForUpdate(ctx context.Context, tokenHash string) (ClaimctlRefreshToken, error) {
+	row := q.db.QueryRow(ctx, getRefreshTokenByHashForUpdate, tokenHash)
+	var i ClaimctlRefreshToken
+	err := row.Scan(
+		&i.ID,
+		&i.UserID,
+		&i.TokenHash,
+		&i.FamilyID,
+		&i.ExpiresAt,
+		&i.Revoked,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
 const revokeAllUserRefreshTokens = `-- name: RevokeAllUserRefreshTokens :exec
 UPDATE claimctl.refresh_tokens
 SET revoked = TRUE
@@ -93,6 +119,17 @@ WHERE user_id = $1 AND revoked = FALSE
 
 func (q *Queries) RevokeAllUserRefreshTokens(ctx context.Context, userID uuid.UUID) error {
 	_, err := q.db.Exec(ctx, revokeAllUserRefreshTokens, userID)
+	return err
+}
+
+const revokeRefreshToken = `-- name: RevokeRefreshToken :exec
+UPDATE claimctl.refresh_tokens
+SET revoked = TRUE
+WHERE token_hash = $1
+`
+
+func (q *Queries) RevokeRefreshToken(ctx context.Context, tokenHash string) error {
+	_, err := q.db.Exec(ctx, revokeRefreshToken, tokenHash)
 	return err
 }
 

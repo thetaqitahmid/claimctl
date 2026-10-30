@@ -4,8 +4,6 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"claimctl-cli/pkg/api"
-
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 )
@@ -18,7 +16,7 @@ var cancelCmd = &cobra.Command{
 This is useful for removing yourself from the queue (pending reservations) or ending an active reservation early.`,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		client, err := api.NewClient(viper.GetString("url"), viper.GetString("token"), viper.GetBool("netrc"))
+		client, err := newClient(cmd)
 		if err != nil {
 			return fmt.Errorf("error creating client: %w", err)
 		}

@@ -65,10 +65,25 @@ func (s *reservationHistoryService) GetUserHistory(ctx context.Context, userID u
 	if err != nil {
 		return nil, fmt.Errorf("failed to get user history: %w", err)
 	}
+	if auth, ok := AuthorizationFromContext(ctx); ok {
+		if userID != auth.User.ID {
+			return nil, ErrAccessDenied
+		}
+		visible := make([]db.GetUserReservationHistoryRow, 0, len(history))
+		for _, row := range history {
+			if AuthorizeRequestResource(ctx, s.db, row.ResourceID, false) == nil {
+				visible = append(visible, row)
+			}
+		}
+		history = visible
+	}
 	return &history, nil
 }
 
 func (s *reservationHistoryService) GetResourceHistory(ctx context.Context, resourceID uuid.UUID, userID uuid.UUID, isAdmin bool) (*[]db.GetResourceReservationHistoryRow, error) {
+	if err := AuthorizeRequestResource(ctx, s.db, resourceID, false); err != nil {
+		return nil, err
+	}
 	if !isAdmin {
 		resource, err := s.db.FindResourceById(ctx, resourceID)
 		if err != nil {

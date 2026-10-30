@@ -12,6 +12,9 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
+
+	"golang.org/x/sys/unix"
 )
 
 // Encrypt encrypts plaintext using AES-GCM with the provided key.
@@ -83,10 +86,17 @@ func Decrypt(ciphertextBase64, keyBase64 string) (string, error) {
 // then a file. If neither exists, it generates a new key and saves it to the file.
 func LoadOrGenerateKey(envVarName, keyFilePath string) (string, error) {
 	// 1. Check Env Var
+	validate := func(value string) (string, error) {
+		key, err := base64.StdEncoding.DecodeString(value)
+		if err != nil || len(key) != 32 {
+			return "", fmt.Errorf("encryption key must be base64 encoded 32 bytes")
+		}
+		return value, nil
+	}
 	val := os.Getenv(envVarName)
 	if val != "" {
 		slog.Info("Loaded encryption key from environment variable", "var", envVarName)
-		return val, nil
+		return validate(val)
 	}
 
 	// 2. Check File
@@ -96,10 +106,36 @@ func LoadOrGenerateKey(envVarName, keyFilePath string) (string, error) {
 		return "", fmt.Errorf("failed to create key directory: %w", err)
 	}
 
+	lock, err := os.OpenFile(keyFilePath+".lock", os.O_CREATE|os.O_RDWR, 0600)
+	if err != nil {
+		return "", err
+	}
+	defer lock.Close()
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		err := unix.Flock(int(lock.Fd()), unix.LOCK_EX|unix.LOCK_NB)
+		if err == nil {
+			break
+		}
+		if !errors.Is(err, unix.EWOULDBLOCK) {
+			return "", err
+		}
+		if time.Now().After(deadline) {
+			return "", fmt.Errorf("encryption key initialization lock timed out")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	defer unix.Flock(int(lock.Fd()), unix.LOCK_UN)
 	content, err := os.ReadFile(keyFilePath)
 	if err == nil {
 		slog.Info("Loaded encryption key from file", "path", keyFilePath)
-		return strings.TrimSpace(string(content)), nil
+		return validate(strings.TrimSpace(string(content)))
+	}
+	if !errors.Is(err, os.ErrNotExist) {
+		return "", err
+	}
+	if _, statErr := os.Lstat(keyFilePath); statErr == nil || !errors.Is(statErr, os.ErrNotExist) {
+		return "", fmt.Errorf("existing encryption key file cannot be read")
 	}
 
 	// 3. Generate
@@ -110,9 +146,32 @@ func LoadOrGenerateKey(envVarName, keyFilePath string) (string, error) {
 	}
 	keyBase64 := base64.StdEncoding.EncodeToString(key)
 
-	if err := os.WriteFile(keyFilePath, []byte(keyBase64), 0600); err != nil {
-		return "", fmt.Errorf("failed to write key to file: %w", err)
+	tmp, err := os.CreateTemp(dir, ".app-key-*")
+	if err != nil {
+		return "", err
 	}
-
+	defer os.Remove(tmp.Name())
+	if _, err := tmp.WriteString(keyBase64); err != nil {
+		tmp.Close()
+		return "", err
+	}
+	if err := tmp.Sync(); err != nil {
+		tmp.Close()
+		return "", err
+	}
+	if err := tmp.Close(); err != nil {
+		return "", err
+	}
+	if err := os.Rename(tmp.Name(), keyFilePath); err != nil {
+		return "", err
+	}
+	directory, err := os.Open(dir)
+	if err != nil {
+		return "", err
+	}
+	defer directory.Close()
+	if err := directory.Sync(); err != nil {
+		return "", err
+	}
 	return keyBase64, nil
 }

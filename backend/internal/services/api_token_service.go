@@ -16,10 +16,11 @@ import (
 )
 
 type APITokenService interface {
-	GenerateToken(ctx context.Context, userID uuid.UUID, name string, expiresAt *time.Time) (string, *db.ClaimctlApiToken, error)
+	GenerateToken(ctx context.Context, userID uuid.UUID, name string, expiresAt *time.Time, options ...TokenOptions) (string, *db.ClaimctlApiToken, error)
 	ListTokens(ctx context.Context, userID uuid.UUID) ([]db.ClaimctlApiToken, error)
 	RevokeToken(ctx context.Context, tokenID string, userID uuid.UUID) error
 	ValidateToken(ctx context.Context, token string) (*db.ClaimctlUser, error)
+	ValidateAuthorization(ctx context.Context, token string) (*Authorization, error)
 }
 
 type apiTokenService struct {
@@ -30,7 +31,40 @@ func NewAPITokenService(db db.Querier) APITokenService {
 	return &apiTokenService{db: db}
 }
 
-func (s *apiTokenService) GenerateToken(ctx context.Context, userID uuid.UUID, name string, expiresAt *time.Time) (string, *db.ClaimctlApiToken, error) {
+func (s *apiTokenService) GenerateToken(ctx context.Context, userID uuid.UUID, name string, expiresAt *time.Time, options ...TokenOptions) (string, *db.ClaimctlApiToken, error) {
+	now := time.Now()
+	if expiresAt == nil {
+		expiry := now.Add(30 * 24 * time.Hour)
+		expiresAt = &expiry
+	}
+	if !expiresAt.After(now) || expiresAt.After(now.Add(90*24*time.Hour)) {
+		return "", nil, fmt.Errorf("expiry must be in the future and within 90 days")
+	}
+	user, err := s.db.FindUserById(ctx, userID)
+	if err != nil || user.Status != "active" {
+		return "", nil, ErrAccessDenied
+	}
+	opts := TokenOptions{Scopes: []string{"read", "reserve"}, SpaceIDs: []uuid.UUID{}}
+	if len(options) > 0 {
+		opts = options[0]
+		if len(opts.Scopes) == 0 {
+			opts.Scopes = []string{"read", "reserve"}
+		}
+		if opts.SpaceIDs == nil {
+			opts.SpaceIDs = []uuid.UUID{}
+		}
+	}
+	for _, scope := range opts.Scopes {
+		admin, valid := TokenScopes[scope]
+		if !valid || (admin && user.Role != "admin") {
+			return "", nil, fmt.Errorf("invalid or unauthorized scope: %s", scope)
+		}
+	}
+	for _, id := range opts.SpaceIDs {
+		if AuthorizeSpace(ctx, s.db, id, userID, user.Role == "admin") != nil {
+			return "", nil, ErrAccessDenied
+		}
+	}
 	// 0. Ensure unique name
 	existingTokens, err := s.ListTokens(ctx, userID)
 	if err != nil {
@@ -67,18 +101,15 @@ func (s *apiTokenService) GenerateToken(ctx context.Context, userID uuid.UUID, n
 	tokenHash := hex.EncodeToString(hash[:])
 
 	// 3. Store in DB
-	var pgExpiresAt pgtype.Timestamptz
-	if expiresAt != nil {
-		pgExpiresAt = pgtype.Timestamptz{Time: *expiresAt, Valid: true}
-	} else {
-		pgExpiresAt = pgtype.Timestamptz{Valid: false}
-	}
+	pgExpiresAt := pgtype.Timestamptz{Time: *expiresAt, Valid: true}
 
 	token, err := s.db.CreateAPIToken(ctx, db.CreateAPITokenParams{
 		UserID:    userID,
 		Name:      uniqueName,
 		TokenHash: tokenHash,
 		ExpiresAt: pgExpiresAt,
+		Scopes:    opts.Scopes,
+		SpaceIds:  opts.SpaceIDs,
 	})
 	if err != nil {
 		return "", nil, fmt.Errorf("failed to store token in DB: %w", err)
@@ -112,6 +143,20 @@ func (s *apiTokenService) RevokeToken(ctx context.Context, tokenID string, userI
 }
 
 func (s *apiTokenService) ValidateToken(ctx context.Context, token string) (*db.ClaimctlUser, error) {
+	auth, err := s.ValidateAuthorization(ctx, token)
+	if err != nil {
+		return nil, err
+	}
+	return &auth.User, nil
+}
+
+func (s *apiTokenService) ValidateAuthorization(ctx context.Context, token string) (*Authorization, error) {
+	if len(token) != 68 || token[:4] != "res_" {
+		return nil, fmt.Errorf("invalid token")
+	}
+	if _, err := hex.DecodeString(token[4:]); err != nil {
+		return nil, fmt.Errorf("invalid token")
+	}
 	// 1. Hash the token
 	hash := sha256.Sum256([]byte(token))
 	tokenHash := hex.EncodeToString(hash[:])
@@ -126,7 +171,10 @@ func (s *apiTokenService) ValidateToken(ctx context.Context, token string) (*db.
 	}
 
 	// 3. Check expiration
-	if apiToken.ExpiresAt.Valid && apiToken.ExpiresAt.Time.Before(time.Now()) {
+	if apiToken.ID == uuid.Nil || apiToken.UserID == uuid.Nil {
+		return nil, fmt.Errorf("invalid token record")
+	}
+	if !apiToken.ExpiresAt.Valid || !apiToken.ExpiresAt.Time.After(time.Now()) {
 		return nil, fmt.Errorf("token expired")
 	}
 
@@ -143,5 +191,5 @@ func (s *apiTokenService) ValidateToken(ctx context.Context, token string) (*db.
 		return nil, fmt.Errorf("user is inactive")
 	}
 
-	return &user, nil
+	return &Authorization{User: user, TokenID: apiToken.ID, Scopes: apiToken.Scopes, SpaceIDs: apiToken.SpaceIds, ExpiresAt: apiToken.ExpiresAt.Time}, nil
 }

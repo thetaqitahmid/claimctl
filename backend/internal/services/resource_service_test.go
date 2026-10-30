@@ -198,8 +198,8 @@ func TestResourceService_GetResource(t *testing.T) {
 
 	tests := []struct {
 		name          string
-		resourceID uuid.UUID
-		userID uuid.UUID
+		resourceID    uuid.UUID
+		userID        uuid.UUID
 		isAdmin       bool
 		mockSetup     func()
 		expectedError string
@@ -208,7 +208,7 @@ func TestResourceService_GetResource(t *testing.T) {
 		{
 			name:       "Successfully get resource as admin",
 			resourceID: testutils.TestUUID(1),
-			userID: testutils.TestUUID(1),
+			userID:     testutils.TestUUID(1),
 			isAdmin:    true,
 			mockSetup: func() {
 				resource := testutils.CreateTestResource(testutils.TestUUID(1), "Test Resource", "test-type", testutils.TestUUID(1))
@@ -219,7 +219,7 @@ func TestResourceService_GetResource(t *testing.T) {
 		{
 			name:       "Successfully get resource with permission",
 			resourceID: testutils.TestUUID(1),
-			userID: testutils.TestUUID(1),
+			userID:     testutils.TestUUID(1),
 			isAdmin:    false,
 			mockSetup: func() {
 				resource := testutils.CreateTestResource(testutils.TestUUID(1), "Test Resource", "test-type", testutils.TestUUID(1))
@@ -231,17 +231,17 @@ func TestResourceService_GetResource(t *testing.T) {
 		{
 			name:       "Resource not found",
 			resourceID: testutils.TestUUID(1),
-			userID: testutils.TestUUID(1),
+			userID:     testutils.TestUUID(1),
 			isAdmin:    true,
 			mockSetup: func() {
 				mockDB.On("FindResourceById", ctx, testutils.TestUUID(1)).Return(db.ClaimctlResource{}, assert.AnError)
 			},
-			expectedError: "resource with ID 00000000-0000-0000-0000-000000000001 not found",
+			expectedError: "access denied",
 		},
 		{
 			name:       "Access denied - not admin no permission",
 			resourceID: testutils.TestUUID(1),
-			userID: testutils.TestUUID(1),
+			userID:     testutils.TestUUID(1),
 			isAdmin:    false,
 			mockSetup: func() {
 				resource := testutils.CreateTestResource(testutils.TestUUID(1), "Test Resource", "test-type", testutils.TestUUID(1))
@@ -361,7 +361,7 @@ func TestResourceService_UpdateResource(t *testing.T) {
 		{
 			name: "Successful resource update",
 			updateReq: UpdateResourceRequest{
-				ID: testutils.TestUUID(1),
+				ID:     testutils.TestUUID(1),
 				Name:   "New Name",
 				Type:   "new-type",
 				Labels: types.JSONBArray{`{"tag": "new"}`},
@@ -381,7 +381,7 @@ func TestResourceService_UpdateResource(t *testing.T) {
 		{
 			name: "Resource not found",
 			updateReq: UpdateResourceRequest{
-				ID: testutils.TestUUID(999),
+				ID:   testutils.TestUUID(999),
 				Name: "New Name",
 			},
 			mockSetup: func() {
@@ -392,7 +392,7 @@ func TestResourceService_UpdateResource(t *testing.T) {
 		{
 			name: "Database error updating resource",
 			updateReq: UpdateResourceRequest{
-				ID: testutils.TestUUID(1),
+				ID:   testutils.TestUUID(1),
 				Name: "New Name",
 			},
 			mockSetup: func() {
@@ -436,7 +436,7 @@ func TestResourceService_DeleteResource(t *testing.T) {
 
 	tests := []struct {
 		name          string
-		resourceID uuid.UUID
+		resourceID    uuid.UUID
 		mockSetup     func()
 		expectedError string
 		shouldSucceed bool
@@ -488,8 +488,8 @@ func TestResourceService_GetResourceWithStatus(t *testing.T) {
 
 	tests := []struct {
 		name          string
-		resourceID uuid.UUID
-		userID uuid.UUID
+		resourceID    uuid.UUID
+		userID        uuid.UUID
 		isAdmin       bool
 		mockSetup     func()
 		expectedError string
@@ -499,22 +499,23 @@ func TestResourceService_GetResourceWithStatus(t *testing.T) {
 		{
 			name:       "Successfully get resource with status as admin",
 			resourceID: testutils.TestUUID(1),
-			userID: testutils.TestUUID(1),
+			userID:     testutils.TestUUID(1),
 			isAdmin:    true,
 			mockSetup: func() {
 				resourceStatus := db.GetResourceReservationStatusRow{
-					ID: testutils.TestUUID(1),
+					ID:                 testutils.TestUUID(1),
 					Name:               "Test Resource",
 					Type:               "test-type",
 					Labels:             types.JSONBArray{`{"tag": "test"}`},
 					CreatedAt:          pgtype.Int8{Int64: testutils.FixedTimestamp(), Valid: true},
 					UpdatedAt:          pgtype.Int8{Int64: testutils.FixedTimestamp(), Valid: true},
-					SpaceID: testutils.TestUUID(1),
+					SpaceID:            testutils.TestUUID(1),
 					ActiveReservations: 2,
 					QueueLength:        3,
-					NextUserID: testutils.TestUUID(5),
+					NextUserID:         testutils.TestUUID(5),
 					NextQueuePosition:  4,
 				}
+				mockDB.On("FindResourceById", ctx, testutils.TestUUID(1)).Return(db.ClaimctlResource{SpaceID: testutils.TestUUID(1)}, nil)
 				mockDB.On("GetResourceReservationStatus", ctx, testutils.TestUUID(1)).Return(resourceStatus, nil)
 				mockDB.On("GetHealthConfig", ctx, testutils.TestUUID(1)).Return(db.ClaimctlResourceHealthConfig{}, assert.AnError)
 				mockDB.On("GetHealthStatus", ctx, testutils.TestUUID(1)).Return(db.ClaimctlResourceHealthStatus{}, assert.AnError)
@@ -523,16 +524,17 @@ func TestResourceService_GetResourceWithStatus(t *testing.T) {
 			expectedStats: &ResourceWithStatus{
 				ActiveReservations: 2,
 				QueueLength:        3,
-				NextUserID: testutils.TestUUID(5),
+				NextUserID:         testutils.TestUUID(5),
 				NextQueuePosition:  4,
 			},
 		},
 		{
 			name:       "Resource not found",
 			resourceID: testutils.TestUUID(1),
-			userID: testutils.TestUUID(1),
+			userID:     testutils.TestUUID(1),
 			isAdmin:    true,
 			mockSetup: func() {
+				mockDB.On("FindResourceById", ctx, testutils.TestUUID(1)).Return(db.ClaimctlResource{SpaceID: testutils.TestUUID(1)}, nil)
 				mockDB.On("GetResourceReservationStatus", ctx, testutils.TestUUID(1)).Return(db.GetResourceReservationStatusRow{}, assert.AnError)
 			},
 			expectedError: "resource with ID 00000000-0000-0000-0000-000000000001 not found",
@@ -586,29 +588,29 @@ func TestResourceService_GetAllResourcesWithStatus(t *testing.T) {
 			mockSetup: func() {
 				resourcesStatus := []db.GetAllResourcesWithReservationStatusRow{
 					{
-						ID: testutils.TestUUID(1),
+						ID:                 testutils.TestUUID(1),
 						Name:               "Resource 1",
 						Type:               "type1",
 						Labels:             types.JSONBArray{`{"tag": "test"}`},
 						CreatedAt:          pgtype.Int8{Int64: testutils.FixedTimestamp(), Valid: true},
 						UpdatedAt:          pgtype.Int8{Int64: testutils.FixedTimestamp(), Valid: true},
-						SpaceID: testutils.TestUUID(1),
+						SpaceID:            testutils.TestUUID(1),
 						ActiveReservations: 1,
 						QueueLength:        2,
-						NextUserID: testutils.TestUUID(3),
+						NextUserID:         testutils.TestUUID(3),
 						NextQueuePosition:  4,
 					},
 					{
-						ID: testutils.TestUUID(2),
+						ID:                 testutils.TestUUID(2),
 						Name:               "Resource 2",
 						Type:               "type2",
 						Labels:             types.JSONBArray{`{"tag": "test"}`},
 						CreatedAt:          pgtype.Int8{Int64: testutils.FixedTimestamp(), Valid: true},
 						UpdatedAt:          pgtype.Int8{Int64: testutils.FixedTimestamp(), Valid: true},
-						SpaceID: testutils.TestUUID(1),
+						SpaceID:            testutils.TestUUID(1),
 						ActiveReservations: 0,
 						QueueLength:        1,
-						NextUserID: testutils.TestUUID(5),
+						NextUserID:         testutils.TestUUID(5),
 						NextQueuePosition:  6,
 					},
 				}

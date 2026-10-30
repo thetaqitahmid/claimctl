@@ -34,7 +34,16 @@ func (store *SQLStore) ExecTx(ctx context.Context, fn func(Querier) error) error
 		return err
 	}
 
+	defer tx.Rollback(ctx)
+	if _, err = tx.Exec(ctx, "SET LOCAL lock_timeout = '5s'"); err != nil {
+		_ = tx.Rollback(ctx)
+		return err
+	}
 	q := New(tx)
+	if err = q.LockRealtimeMutation(ctx); err != nil {
+		_ = tx.Rollback(ctx)
+		return err
+	}
 	err = fn(q)
 	if err != nil {
 		if rbErr := tx.Rollback(ctx); rbErr != nil {

@@ -74,19 +74,11 @@ spec:
             {{- toYaml .Values.frontend.resources | nindent 12 }}
           env:
             - name: BACKEND_HOST
-              {{- if .Values.ingress.enabled }}
-              {{- $host := (index .Values.ingress.hosts 0).host }}
-              value: {{ $host | quote }}
-              {{- else }}
               value: {{ include "claimctl.fullname" . }}-backend
-              {{- end }}
             - name: BACKEND_PORT
-              {{- if .Values.ingress.enabled }}
-              {{- $tls := .Values.ingress.tls }}
-              value: {{ if $tls }}"443"{{ else }}"80"{{ end }}
-              {{- else }}
               value: {{ .Values.backend.service.port | quote }}
-              {{- end }}
+            - name: TRUSTED_INGRESS_CIDR
+              value: {{ .Values.frontend.trustedIngressCIDR | quote }}
             {{- with .Values.frontend.extraEnv }}
             {{- toYaml . | nindent 12 }}
             {{- end }}

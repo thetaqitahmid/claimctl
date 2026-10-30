@@ -2,7 +2,6 @@ package services
 
 import (
 	"context"
-	"encoding/json"
 	"log/slog"
 	"sync"
 
@@ -34,8 +33,6 @@ func (s *realtimeService) Subscribe(ctx context.Context) (chan types.Event, erro
 	s.clients[clientChan] = struct{}{}
 	s.clientsMux.Unlock()
 
-	slog.Info("New client subscribed to realtime events", "total_clients", len(s.clients))
-
 	// Handle client disconnection
 	go func() {
 		<-ctx.Done()
@@ -48,9 +45,6 @@ func (s *realtimeService) Subscribe(ctx context.Context) (chan types.Event, erro
 func (s *realtimeService) Broadcast(event types.Event) {
 	s.clientsMux.RLock()
 	defer s.clientsMux.RUnlock()
-
-	payloadBytes, _ := json.Marshal(event.Payload)
-	slog.Info("Broadcasting event", "type", event.Type, "payload_preview", string(payloadBytes), "active_clients", len(s.clients))
 
 	for clientChan := range s.clients {
 		select {

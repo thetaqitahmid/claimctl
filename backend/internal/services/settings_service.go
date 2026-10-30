@@ -7,13 +7,17 @@ import (
 	"crypto/x509"
 	"database/sql"
 	"encoding/pem"
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/golang-jwt/jwt/v5"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
+
 	"github.com/thetaqitahmid/claimctl/internal/db"
 	"github.com/thetaqitahmid/claimctl/internal/utils"
 )
@@ -34,16 +38,67 @@ func NewSettingsService(queries db.Querier, encryptionKey string) *SettingsServi
 
 // GetOrGenerateJWTKeys retrieves JWT keys from settings (DB or Env) or generates/stores new ones.
 func (s *SettingsService) GetOrGenerateJWTKeys(ctx context.Context) (*rsa.PrivateKey, *rsa.PublicKey, error) {
-	privKeyPEM := s.GetString(ctx, "jwt_private_key")
-	pubKeyPEM := s.GetString(ctx, "jwt_public_key")
+	store, ok := s.queries.(db.Store)
+	if !ok {
+		return nil, nil, fmt.Errorf("JWT initialization requires transactional storage")
+	}
+	ctx, cancel := context.WithTimeout(ctx, 15*time.Second)
+	defer cancel()
+	var privateKey *rsa.PrivateKey
+	var publicKey *rsa.PublicKey
+	err := store.ExecTx(ctx, func(q db.Querier) error {
+		if err := q.LockJWTInitialization(ctx); err != nil {
+			return err
+		}
+		var err error
+		privateKey, publicKey, err = NewSettingsService(q, s.encryptionKey).loadOrCreateJWTKeys(ctx)
+		return err
+	})
+	return privateKey, publicKey, err
+}
+
+func (s *SettingsService) loadOrCreateJWTKeys(ctx context.Context) (*rsa.PrivateKey, *rsa.PublicKey, error) {
+	load := func(key string) (string, error) {
+		setting, err := s.queries.GetSetting(ctx, key)
+		if errors.Is(err, pgx.ErrNoRows) || errors.Is(err, sql.ErrNoRows) {
+			return "", nil
+		}
+		if err != nil {
+			return "", err
+		}
+		if setting.Value == "" {
+			return "", nil
+		}
+		if setting.IsSecret {
+			return utils.Decrypt(setting.Value, s.encryptionKey)
+		}
+		return setting.Value, nil
+	}
+	privKeyPEM, err := load("jwt_private_key")
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to load JWT private key: %w", err)
+	}
+	pubKeyPEM, err := load("jwt_public_key")
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to load JWT public key: %w", err)
+	}
+	if (privKeyPEM == "") != (pubKeyPEM == "") {
+		return nil, nil, fmt.Errorf("partial JWT key pair")
+	}
+	fromEnvironment := privKeyPEM == ""
+	if fromEnvironment {
+		privKeyPEM = os.Getenv("JWT_PRIVATE_KEY")
+		pubKeyPEM = os.Getenv("JWT_PUBLIC_KEY")
+	}
+	if (privKeyPEM == "") != (pubKeyPEM == "") {
+		return nil, nil, fmt.Errorf("partial JWT environment key pair")
+	}
 
 	// 1. Try to load existing keys
 	if privKeyPEM != "" && pubKeyPEM != "" {
 		privateKey, err := jwt.ParseRSAPrivateKeyFromPEM([]byte(privKeyPEM))
 		if err != nil {
 			slog.Error("Failed to parse JWT private key from settings", "error", err)
-			// Don't return error yet, might want to regenerate?
-			// For now, let's treat it as a hard failure because existing keys are corrupt.
 			return nil, nil, fmt.Errorf("failed to parse JWT_PRIVATE_KEY: %w", err)
 		}
 
@@ -52,7 +107,20 @@ func (s *SettingsService) GetOrGenerateJWTKeys(ctx context.Context) (*rsa.Privat
 			return nil, nil, fmt.Errorf("failed to parse JWT_PUBLIC_KEY: %w", err)
 		}
 
-		slog.Info("Loaded JWT keys from settings")
+		if err := privateKey.Validate(); err != nil {
+			return nil, nil, fmt.Errorf("invalid JWT private key: %w", err)
+		}
+		if privateKey.N.Cmp(publicKey.N) != 0 || privateKey.E != publicKey.E {
+			return nil, nil, fmt.Errorf("mismatched JWT key pair")
+		}
+		if fromEnvironment {
+			if _, err := s.Set(ctx, "jwt_private_key", privKeyPEM, "auth", "JWT Private Key", true); err != nil {
+				return nil, nil, err
+			}
+			if _, err := s.Set(ctx, "jwt_public_key", pubKeyPEM, "auth", "JWT Public Key", false); err != nil {
+				return nil, nil, err
+			}
+		}
 		return privateKey, publicKey, nil
 	}
 
@@ -84,12 +152,12 @@ func (s *SettingsService) GetOrGenerateJWTKeys(ctx context.Context) (*rsa.Privat
 	// 4. Store in Database
 	_, err = s.Set(ctx, "jwt_private_key", string(privPEMBytes), "auth", "JWT Private Key", true)
 	if err != nil {
-		slog.Warn("Failed to persist JWT private key to DB", "error", err)
+		return nil, nil, fmt.Errorf("failed to persist JWT private key: %w", err)
 	}
 
 	_, err = s.Set(ctx, "jwt_public_key", string(pubPEMBytes), "auth", "JWT Public Key", false)
 	if err != nil {
-		slog.Warn("Failed to persist JWT public key to DB", "error", err)
+		return nil, nil, fmt.Errorf("failed to persist JWT public key: %w", err)
 	}
 
 	slog.Info("Generated and saved new JWT keys to settings")

@@ -7,8 +7,6 @@ import (
 	"text/tabwriter"
 	"time"
 
-	"claimctl-cli/pkg/api"
-
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 )
@@ -20,7 +18,7 @@ var auditCmd = &cobra.Command{
 		limit, _ := cmd.Flags().GetInt("limit")
 		offset, _ := cmd.Flags().GetInt("offset")
 
-		client, err := api.NewClient(viper.GetString("url"), viper.GetString("token"), viper.GetBool("netrc"))
+		client, err := newClient(cmd)
 		if err != nil {
 			return fmt.Errorf("error creating client: %w", err)
 		}
@@ -37,6 +35,9 @@ var auditCmd = &cobra.Command{
 		}
 
 		if len(logs) == 0 {
+			if viper.GetBool("json") {
+				return outputJSON(cmd, []any{})
+			}
 			fmt.Println("No audit logs found.")
 			return nil
 		}

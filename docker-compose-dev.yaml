@@ -4,6 +4,8 @@ services:
     ports:
       - "3000:3000"
     environment:
+      - DATABASE_URL=
+      - TRUSTED_PROXY_CIDRS=172.30.0.0/24
       - DB_HOST=db
       - DB_PORT=5432
       - DB_USER=devuser
@@ -43,6 +45,7 @@ services:
     environment:
       - BACKEND_HOST=backend
       - BACKEND_PORT=3000
+      - TRUSTED_INGRESS_CIDR=127.0.0.1/32
     depends_on:
       backend:
         condition: service_healthy
@@ -60,14 +63,17 @@ services:
 
   db:
     image: postgres:18.1-alpine
+    entrypoint: ["/usr/local/bin/claimctl-postgres-preflight"]
     environment:
       POSTGRES_USER: devuser
       POSTGRES_PASSWORD: devpass
       POSTGRES_DB: devdb
+      PGDATA: /var/lib/postgresql/18/docker
     volumes:
-      - postgres_data:/var/lib/postgresql/data
+      - postgres_data:/var/lib/postgresql
+      - ./deployment/postgres-preflight.sh:/usr/local/bin/claimctl-postgres-preflight:ro
     ports:
-      - "5432:5432"
+      - "127.0.0.1:55432:5432"
     healthcheck:
       test: [ "CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB" ]
       interval: 5s
@@ -85,6 +91,9 @@ services:
 networks:
   app-network:
     driver: bridge
+    ipam:
+      config:
+        - subnet: 172.30.0.0/24
 
 volumes:
   postgres_data:

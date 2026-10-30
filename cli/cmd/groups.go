@@ -7,8 +7,6 @@ import (
 	"text/tabwriter"
 	"time"
 
-	"claimctl-cli/pkg/api"
-
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 )
@@ -22,7 +20,7 @@ var listGroupsCmd = &cobra.Command{
 	Use:   "list",
 	Short: "List all groups",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		client, err := api.NewClient(viper.GetString("url"), viper.GetString("token"), viper.GetBool("netrc"))
+		client, err := newClient(cmd)
 		if err != nil {
 			return fmt.Errorf("error creating client: %w", err)
 		}
@@ -61,7 +59,7 @@ var createGroupCmd = &cobra.Command{
 			return fmt.Errorf("--name is required")
 		}
 
-		client, err := api.NewClient(viper.GetString("url"), viper.GetString("token"), viper.GetBool("netrc"))
+		client, err := newClient(cmd)
 		if err != nil {
 			return fmt.Errorf("error creating client: %w", err)
 		}
@@ -87,7 +85,7 @@ var updateGroupCmd = &cobra.Command{
 	Short: "Update a group",
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		client, err := api.NewClient(viper.GetString("url"), viper.GetString("token"), viper.GetBool("netrc"))
+		client, err := newClient(cmd)
 		if err != nil {
 			return fmt.Errorf("error creating client: %w", err)
 		}
@@ -113,7 +111,7 @@ var deleteGroupCmd = &cobra.Command{
 	Short: "Delete a group",
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		client, err := api.NewClient(viper.GetString("url"), viper.GetString("token"), viper.GetBool("netrc"))
+		client, err := newClient(cmd)
 		if err != nil {
 			return fmt.Errorf("error creating client: %w", err)
 		}
@@ -134,7 +132,7 @@ var listGroupMembersCmd = &cobra.Command{
 	Short: "List members of a group",
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		client, err := api.NewClient(viper.GetString("url"), viper.GetString("token"), viper.GetBool("netrc"))
+		client, err := newClient(cmd)
 		if err != nil {
 			return fmt.Errorf("error creating client: %w", err)
 		}
@@ -151,6 +149,9 @@ var listGroupMembersCmd = &cobra.Command{
 		}
 
 		if len(members) == 0 {
+			if viper.GetBool("json") {
+				return outputJSON(cmd, []any{})
+			}
 			fmt.Println("No members in this group.")
 			return nil
 		}
@@ -170,7 +171,7 @@ var addGroupMemberCmd = &cobra.Command{
 	Short: "Add a user to a group",
 	Args:  cobra.ExactArgs(2),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		client, err := api.NewClient(viper.GetString("url"), viper.GetString("token"), viper.GetBool("netrc"))
+		client, err := newClient(cmd)
 		if err != nil {
 			return fmt.Errorf("error creating client: %w", err)
 		}
@@ -191,7 +192,7 @@ var removeGroupMemberCmd = &cobra.Command{
 	Short: "Remove a user from a group",
 	Args:  cobra.ExactArgs(2),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		client, err := api.NewClient(viper.GetString("url"), viper.GetString("token"), viper.GetBool("netrc"))
+		client, err := newClient(cmd)
 		if err != nil {
 			return fmt.Errorf("error creating client: %w", err)
 		}

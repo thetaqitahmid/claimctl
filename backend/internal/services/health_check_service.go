@@ -4,15 +4,13 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
-	"net"
-	"net/http"
 	"sync"
 	"time"
 
 	"github.com/google/uuid"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
-	probing "github.com/prometheus-community/pro-bing"
 	"github.com/thetaqitahmid/claimctl/internal/db"
 	"github.com/thetaqitahmid/claimctl/internal/utils"
 )
@@ -46,7 +44,7 @@ type HealthCheckService interface {
 }
 
 type healthCheckService struct {
-	db          db.Querier
+	db          db.Store
 	jobQueue    chan uuid.UUID
 	stopChan    chan struct{}
 	workerCount int
@@ -56,9 +54,9 @@ type healthCheckService struct {
 	running     bool
 }
 
-func NewHealthCheckService(database db.Querier) HealthCheckService {
-	workerCount := utils.GetEnvAsInt("HEALTH_CHECK_WORKERS", 10)
-	queueSize := utils.GetEnvAsInt("HEALTH_CHECK_QUEUE_SIZE", 100)
+func NewHealthCheckService(database db.Store) HealthCheckService {
+	workerCount := min(64, max(1, utils.GetEnvAsInt("HEALTH_CHECK_WORKERS", 10)))
+	queueSize := min(1000, max(1, utils.GetEnvAsInt("HEALTH_CHECK_QUEUE_SIZE", 100)))
 
 	return &healthCheckService{
 		db:          database,
@@ -77,6 +75,7 @@ func (s *healthCheckService) StartMonitoring(ctx context.Context) error {
 		return fmt.Errorf("health check monitoring already running")
 	}
 	s.running = true
+	s.stopChan = make(chan struct{})
 	s.mu.Unlock()
 
 	slog.Info("Starting health check monitoring",
@@ -102,12 +101,11 @@ func (s *healthCheckService) StopMonitoring() error {
 		s.mu.Unlock()
 		return fmt.Errorf("health check monitoring not running")
 	}
-	s.running = false
-	s.mu.Unlock()
-
 	slog.Info("Stopping health check monitoring")
 	close(s.stopChan)
 	s.wg.Wait()
+	s.running = false
+	s.mu.Unlock()
 	slog.Info("Health check monitoring stopped")
 
 	return nil
@@ -194,6 +192,23 @@ func (s *healthCheckService) scheduleChecks(ctx context.Context) error {
 }
 
 func (s *healthCheckService) ExecuteCheck(ctx context.Context, resourceID uuid.UUID) error {
+	if err := AuthorizeRequestResource(ctx, s.db, resourceID, true); err != nil {
+		return err
+	}
+	checkCtx, cancel := context.WithTimeout(ctx, 45*time.Second)
+	defer cancel()
+	ctx = checkCtx
+	name := "health:" + resourceID.String()
+	fence := uuid.New()
+	leaseCtx, leaseCancel := context.WithTimeout(ctx, 5*time.Second)
+	_, err := s.db.AcquireWorkerLease(leaseCtx, db.AcquireWorkerLeaseParams{Name: name, Fence: fence})
+	leaseCancel()
+	if err == pgx.ErrNoRows {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
 	// Get health check configuration
 	configCtx, configCancel := context.WithTimeout(ctx, 5*time.Second)
 	config, err := s.db.GetHealthConfig(configCtx, resourceID)
@@ -214,16 +229,7 @@ func (s *healthCheckService) ExecuteCheck(ctx context.Context, resourceID uuid.U
 
 	startTime := time.Now()
 
-	switch HealthCheckType(config.CheckType) {
-	case HealthCheckTypePing:
-		err = s.executePingCheck(config.Target, int(config.TimeoutSeconds.Int32), int(config.RetryCount.Int32))
-	case HealthCheckTypeHTTP:
-		err = s.executeHTTPCheck(config.Target, int(config.TimeoutSeconds.Int32), int(config.RetryCount.Int32))
-	case HealthCheckTypeTCP:
-		err = s.executeTCPCheck(config.Target, int(config.TimeoutSeconds.Int32), int(config.RetryCount.Int32))
-	default:
-		return fmt.Errorf("unknown check type: %s", config.CheckType)
-	}
+	err = executeHealthProbe(ctx, HealthCheckType(config.CheckType), config.Target, int(config.TimeoutSeconds.Int32), int(config.RetryCount.Int32))
 
 	responseTimeMs = int32(time.Since(startTime).Milliseconds())
 
@@ -235,10 +241,10 @@ func (s *healthCheckService) ExecuteCheck(ctx context.Context, resourceID uuid.U
 	}
 
 	// Record the result
-	return s.recordHealthStatus(ctx, resourceID, status, responseTimeMs, errorMessage)
+	return s.recordHealthStatus(ctx, resourceID, status, responseTimeMs, errorMessage, name, fence, max(1, config.IntervalSeconds.Int32))
 }
 
-func (s *healthCheckService) recordHealthStatus(ctx context.Context, resourceID uuid.UUID, status HealthStatus, responseTimeMs int32, errorMessage string) error {
+func (s *healthCheckService) recordHealthStatus(ctx context.Context, resourceID uuid.UUID, status HealthStatus, responseTimeMs int32, errorMessage string, name string, fence uuid.UUID, interval int32) error {
 	dbCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
 
@@ -252,12 +258,16 @@ func (s *healthCheckService) recordHealthStatus(ctx context.Context, resourceID 
 		respTime = pgtype.Int4{Int32: responseTimeMs, Valid: true}
 	}
 
-	_, err := s.db.CreateHealthStatus(dbCtx, db.CreateHealthStatusParams{
-		ResourceID:     resourceID,
-		Status:         string(status),
-		ResponseTimeMs: respTime,
-		ErrorMessage:   errMsg,
-		CheckedAt:      time.Now().Unix(),
+	err := s.db.ExecTx(dbCtx, func(q db.Querier) error {
+		count, err := q.FinishWorkerLease(dbCtx, db.FinishWorkerLeaseParams{Name: name, Fence: fence, DelaySeconds: interval})
+		if err != nil || count == 0 {
+			return err
+		}
+		_, err = q.CreateHealthStatus(dbCtx, db.CreateHealthStatusParams{
+			ResourceID: resourceID, Status: string(status), ResponseTimeMs: respTime,
+			ErrorMessage: errMsg, CheckedAt: time.Now().Unix(),
+		})
+		return err
 	})
 
 	if err != nil {
@@ -272,79 +282,10 @@ func (s *healthCheckService) recordHealthStatus(ctx context.Context, resourceID 
 	return nil
 }
 
-func (s *healthCheckService) executePingCheck(target string, timeoutSeconds int, retryCount int) error {
-	pinger, err := probing.NewPinger(target)
-	if err != nil {
-		return fmt.Errorf("failed to create pinger: %w", err)
-	}
-
-	pinger.Count = retryCount + 1
-	pinger.Timeout = time.Duration(timeoutSeconds) * time.Second
-	pinger.SetPrivileged(false)
-
-	err = pinger.Run()
-	if err != nil {
-		return fmt.Errorf("ping failed: %w", err)
-	}
-
-	stats := pinger.Statistics()
-	if stats.PacketsRecv == 0 {
-		return fmt.Errorf("no packets received")
-	}
-
-	return nil
-}
-
-func (s *healthCheckService) executeHTTPCheck(target string, timeoutSeconds int, retryCount int) error {
-	client := &http.Client{
-		Timeout: time.Duration(timeoutSeconds) * time.Second,
-	}
-
-	var lastErr error
-	for attempt := 0; attempt <= retryCount; attempt++ {
-		resp, err := client.Get(target)
-		if err != nil {
-			lastErr = err
-			continue
-		}
-		defer resp.Body.Close()
-
-		if resp.StatusCode >= 200 && resp.StatusCode < 400 {
-			return nil
-		}
-
-		lastErr = fmt.Errorf("HTTP status %d", resp.StatusCode)
-	}
-
-	if lastErr != nil {
-		return fmt.Errorf("HTTP check failed after %d retries: %w", retryCount, lastErr)
-	}
-
-	return fmt.Errorf("HTTP check failed after %d retries", retryCount)
-}
-
-func (s *healthCheckService) executeTCPCheck(target string, timeoutSeconds int, retryCount int) error {
-	var lastErr error
-	timeout := time.Duration(timeoutSeconds) * time.Second
-
-	for attempt := 0; attempt <= retryCount; attempt++ {
-		conn, err := net.DialTimeout("tcp", target, timeout)
-		if err != nil {
-			lastErr = err
-			continue
-		}
-		conn.Close()
-		return nil
-	}
-
-	if lastErr != nil {
-		return fmt.Errorf("TCP check failed after %d retries: %w", retryCount, lastErr)
-	}
-
-	return fmt.Errorf("TCP check failed after %d retries", retryCount)
-}
-
 func (s *healthCheckService) GetHealthConfig(ctx context.Context, resourceID uuid.UUID) (*db.ClaimctlResourceHealthConfig, error) {
+	if err := AuthorizeRequestResource(ctx, s.db, resourceID, false); err != nil {
+		return nil, err
+	}
 	config, err := s.db.GetHealthConfig(ctx, resourceID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get health config: %w", err)
@@ -353,6 +294,25 @@ func (s *healthCheckService) GetHealthConfig(ctx context.Context, resourceID uui
 }
 
 func (s *healthCheckService) UpsertHealthConfig(ctx context.Context, params db.UpsertHealthConfigParams) (*db.ClaimctlResourceHealthConfig, error) {
+	if err := AuthorizeRequestResource(ctx, s.db, params.ResourceID, true); err != nil {
+		return nil, err
+	}
+	if params.TimeoutSeconds.Int32 < 1 || params.TimeoutSeconds.Int32 > 30 || params.RetryCount.Int32 < 0 || params.RetryCount.Int32 > 3 || params.IntervalSeconds.Int32 < 10 || params.IntervalSeconds.Int32 > 86400 {
+		return nil, fmt.Errorf("health interval/timeout/retries out of bounds")
+	}
+	policy, err := newHealthEgressPolicy()
+	if err != nil {
+		return nil, err
+	}
+	host, port, err := healthTarget(HealthCheckType(params.CheckType), params.Target)
+	if err != nil {
+		return nil, err
+	}
+	resolveCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	if _, err := policy.addresses(resolveCtx, host, port); err != nil {
+		return nil, err
+	}
 	config, err := s.db.UpsertHealthConfig(ctx, params)
 	if err != nil {
 		return nil, fmt.Errorf("failed to upsert health config: %w", err)
@@ -361,6 +321,9 @@ func (s *healthCheckService) UpsertHealthConfig(ctx context.Context, params db.U
 }
 
 func (s *healthCheckService) DeleteHealthConfig(ctx context.Context, resourceID uuid.UUID) error {
+	if err := AuthorizeRequestResource(ctx, s.db, resourceID, true); err != nil {
+		return err
+	}
 	err := s.db.DeleteHealthConfig(ctx, resourceID)
 	if err != nil {
 		return fmt.Errorf("failed to delete health config: %w", err)
@@ -369,6 +332,9 @@ func (s *healthCheckService) DeleteHealthConfig(ctx context.Context, resourceID 
 }
 
 func (s *healthCheckService) GetHealthStatus(ctx context.Context, resourceID uuid.UUID) (*db.ClaimctlResourceHealthStatus, error) {
+	if err := AuthorizeRequestResource(ctx, s.db, resourceID, false); err != nil {
+		return nil, err
+	}
 	status, err := s.db.GetHealthStatus(ctx, resourceID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get health status: %w", err)
@@ -377,6 +343,9 @@ func (s *healthCheckService) GetHealthStatus(ctx context.Context, resourceID uui
 }
 
 func (s *healthCheckService) GetHealthHistory(ctx context.Context, resourceID uuid.UUID, limit int32) ([]db.ClaimctlResourceHealthStatus, error) {
+	if err := AuthorizeRequestResource(ctx, s.db, resourceID, false); err != nil {
+		return nil, err
+	}
 	history, err := s.db.GetHealthHistory(ctx, db.GetHealthHistoryParams{
 		ResourceID: resourceID,
 		Limit:      limit,

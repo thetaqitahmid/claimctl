@@ -36,7 +36,7 @@ var listWebhooksCmd = &cobra.Command{
 	Use:   "list",
 	Short: "List all webhooks",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		client, err := api.NewClient(viper.GetString("url"), viper.GetString("token"), viper.GetBool("netrc"))
+		client, err := newClient(cmd)
 		if err != nil {
 			return fmt.Errorf("error creating client: %w", err)
 		}
@@ -90,7 +90,7 @@ Use --file for bulk creation from a JSON file:
     }
   ]`,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		client, err := api.NewClient(viper.GetString("url"), viper.GetString("token"), viper.GetBool("netrc"))
+		client, err := newClient(cmd)
 		if err != nil {
 			return fmt.Errorf("error creating client: %w", err)
 		}
@@ -208,7 +208,7 @@ var deleteWebhookCmd = &cobra.Command{
 	Short: "Delete a webhook",
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		client, err := api.NewClient(viper.GetString("url"), viper.GetString("token"), viper.GetBool("netrc"))
+		client, err := newClient(cmd)
 		if err != nil {
 			return fmt.Errorf("error creating client: %w", err)
 		}
@@ -232,7 +232,7 @@ var updateWebhookCmd = &cobra.Command{
 	Short: "Update an existing webhook",
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		client, err := api.NewClient(viper.GetString("url"), viper.GetString("token"), viper.GetBool("netrc"))
+		client, err := newClient(cmd)
 		if err != nil {
 			return fmt.Errorf("error creating client: %w", err)
 		}
@@ -282,7 +282,7 @@ var attachWebhookCmd = &cobra.Command{
 Available events: 'reservation.created', 'reservation.cancelled', 'reservation.activated', 'reservation.completed', 'reservation.expired'.
 Use comma-separated list for --events (e.g. "reservation.created,reservation.cancelled")`,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		client, err := api.NewClient(viper.GetString("url"), viper.GetString("token"), viper.GetBool("netrc"))
+		client, err := newClient(cmd)
 		if err != nil {
 			return fmt.Errorf("error creating client: %w", err)
 		}
@@ -320,7 +320,7 @@ var detachWebhookCmd = &cobra.Command{
 	Short: "Detach a webhook from a resource",
 	Args:  cobra.ExactArgs(2),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		client, err := api.NewClient(viper.GetString("url"), viper.GetString("token"), viper.GetBool("netrc"))
+		client, err := newClient(cmd)
 		if err != nil {
 			return fmt.Errorf("error creating client: %w", err)
 		}

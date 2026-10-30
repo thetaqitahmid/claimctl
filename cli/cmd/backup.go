@@ -6,8 +6,6 @@ import (
 	"os"
 	"time"
 
-	"claimctl-cli/pkg/api"
-
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 )
@@ -25,7 +23,7 @@ Secrets are exported in their encrypted form. The same
 APP_ENCRYPTION_KEY must be configured on the target instance
 for secrets to remain usable after a restore.`,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		client, err := api.NewClient(viper.GetString("url"), viper.GetString("token"), viper.GetBool("netrc"))
+		client, err := newClient(cmd)
 		if err != nil {
 			return fmt.Errorf("error creating client: %w", err)
 		}

@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"os"
 	"time"
 
 	"github.com/google/uuid"
@@ -35,22 +34,22 @@ type OIDCLoginRequest struct {
 
 type UserService interface {
 	Login(ctx context.Context, req LoginRequest) (*db.ClaimctlUser, error)
-	CreateUser(ctx context.Context, req db.CreateUserParams) (*db.ClaimctlUser, error)
-	GetUsers(ctx context.Context) (*[]db.ClaimctlUser, error)
-	GetUser(ctx context.Context, email string, id uuid.UUID) (*db.ClaimctlUser, error)
+	CreateUser(ctx context.Context, req db.CreateUserParams) (*AdminUserResponse, error)
+	GetUsers(ctx context.Context) (*[]AdminUserResponse, error)
+	GetUser(ctx context.Context, email string, id uuid.UUID) (*AdminUserResponse, error)
 	UpdateUser(ctx context.Context, req *UpdateUserRequest) error
 	DeleteUser(ctx context.Context, id uuid.UUID) error
 	EnsureAdminExists(ctx context.Context) error
 	LoginOIDC(ctx context.Context, req OIDCLoginRequest) (*db.ClaimctlUser, error)
-	UpdateChannelConfig(ctx context.Context, userID uuid.UUID, slackDest, teamsUrl, notificationEmail string) (*db.ClaimctlUser, error)
+	UpdateChannelConfig(ctx context.Context, userID uuid.UUID, slackDest, teamsUrl, notificationEmail string) (*AdminUserResponse, error)
 	UpdatePassword(ctx context.Context, userID uuid.UUID, currentPassword, newPassword string) error
 }
 
 type UpdateUserRequest struct {
-	ID       *uuid.UUID  `json:"id"`
-	Email    *string `json:"email"`
-	Name     *string `json:"name"`
-	Password *string `json:"password"`
+	ID       *uuid.UUID `json:"id"`
+	Email    *string    `json:"email"`
+	Name     *string    `json:"name"`
+	Password *string    `json:"password"`
 
 	Role   *string `json:"role"`
 	Status *string `json:"status"`
@@ -167,7 +166,7 @@ func (s *userService) Login(ctx context.Context, req LoginRequest) (*db.Claimctl
 	return &user, nil
 }
 
-func (s *userService) CreateUser(ctx context.Context, req db.CreateUserParams) (*db.ClaimctlUser, error) {
+func (s *userService) CreateUser(ctx context.Context, req db.CreateUserParams) (*AdminUserResponse, error) {
 	if req.Email == "" || req.Name == "" || req.Password == "" {
 		return nil, fmt.Errorf("all fields must be provided to create a user")
 	}
@@ -210,80 +209,89 @@ func (s *userService) CreateUser(ctx context.Context, req db.CreateUserParams) (
 	if err != nil {
 		return nil, fmt.Errorf("failed to retrieve created user: %w", err)
 	}
-	return &user, nil
+	return adminUserResponse(user), nil
 }
 
-func (s *userService) GetUsers(ctx context.Context) (*[]db.ClaimctlUser, error) {
+func (s *userService) GetUsers(ctx context.Context) (*[]AdminUserResponse, error) {
 	users, err := s.db.FindAllUsers(ctx)
 	if err != nil {
 		return nil, err
 	}
-	return &users, nil
+	responses := make([]AdminUserResponse, 0, len(users))
+	for _, user := range users {
+		responses = append(responses, *adminUserResponse(user))
+	}
+	return &responses, nil
 }
 
-func (s *userService) GetUser(ctx context.Context, email string, id uuid.UUID) (*db.ClaimctlUser, error) {
+func (s *userService) GetUser(ctx context.Context, email string, id uuid.UUID) (*AdminUserResponse, error) {
 	if email != "" {
 		user, err := s.db.FindUserByEmail(ctx, email)
 		if err != nil {
 			return nil, err
 		}
-		return &user, nil
+		return adminUserResponse(user), nil
 	} else if id != uuid.Nil {
 		user, err := s.db.FindUserById(ctx, id)
 		if err != nil {
 			return nil, err
 		}
-		return &user, nil
+		return adminUserResponse(user), nil
 	}
 	return nil, fmt.Errorf("either email or id must be provided to find a user")
 }
 
 func (s *userService) UpdateUser(ctx context.Context, req *UpdateUserRequest) error {
-	oldUser, err := s.db.FindUserById(ctx, *req.ID)
-	if err != nil {
-		return fmt.Errorf("failed to retrieve user with ID %s: %w", *req.ID, err)
+	if req == nil || req.ID == nil {
+		return fmt.Errorf("user ID is required")
 	}
-
-	if req.Name == nil || len(*req.Name) == 0 {
-		req.Name = &oldUser.Name
-	}
-	if req.Email == nil || len(*req.Email) == 0 {
-		req.Email = &oldUser.Email
-	}
-	if req.Status == nil || len(*req.Status) == 0 {
-		req.Status = &oldUser.Status
-	}
-
-	if req.Role == nil || len(*req.Role) == 0 {
-		req.Role = &oldUser.Role
-	} else if *req.Role != "admin" && *req.Role != "user" {
-		return fmt.Errorf("invalid role")
-	}
-
-	if req.Password == nil || len(*req.Password) == 0 {
-		req.Password = &oldUser.Password
-	} else {
-		if !utils.IsValidPassword(*req.Password) {
-			return fmt.Errorf(
-				"Password must be at least 8 characters long and contain uppercase, lowercase, and special character",
-			)
-		}
-		pass, err := bcrypt.GenerateFromPassword([]byte(*req.Password), bcrypt.DefaultCost)
+	err := s.store.ExecTx(ctx, func(q db.Querier) error {
+		oldUser, err := q.FindUserByIdForUpdate(ctx, *req.ID)
 		if err != nil {
-			return fmt.Errorf("failed to hash password: %w", err)
+			return fmt.Errorf("failed to retrieve user with ID %s: %w", *req.ID, err)
 		}
-		*req.Password = string(pass)
-	}
 
-	err = s.db.UpdateUserById(ctx, db.UpdateUserByIdParams{
-		ID:       *req.ID,
-		Email:    *req.Email,
-		Name:     *req.Name,
-		Password: *req.Password,
+		if req.Name == nil || len(*req.Name) == 0 {
+			req.Name = &oldUser.Name
+		}
+		if req.Email == nil || len(*req.Email) == 0 {
+			req.Email = &oldUser.Email
+		}
+		if req.Status == nil || len(*req.Status) == 0 {
+			req.Status = &oldUser.Status
+		}
 
-		Role:      *req.Role,
-		LastLogin: oldUser.LastLogin,
-		Status:    *req.Status,
+		if req.Role == nil || len(*req.Role) == 0 {
+			req.Role = &oldUser.Role
+		} else if *req.Role != "admin" && *req.Role != "user" {
+			return fmt.Errorf("invalid role")
+		}
+
+		if req.Password == nil || len(*req.Password) == 0 {
+			req.Password = &oldUser.Password
+		} else {
+			if !utils.IsValidPassword(*req.Password) {
+				return fmt.Errorf(
+					"Password must be at least 8 characters long and contain uppercase, lowercase, and special character",
+				)
+			}
+			pass, err := bcrypt.GenerateFromPassword([]byte(*req.Password), bcrypt.DefaultCost)
+			if err != nil {
+				return fmt.Errorf("failed to hash password: %w", err)
+			}
+			*req.Password = string(pass)
+		}
+
+		if err := q.UpdateUserById(ctx, db.UpdateUserByIdParams{
+			ID: *req.ID, Email: *req.Email, Name: *req.Name, Password: *req.Password,
+			Role: *req.Role, LastLogin: oldUser.LastLogin, Status: *req.Status,
+		}); err != nil {
+			return err
+		}
+		if *req.Password != oldUser.Password || *req.Status != "active" {
+			return q.RevokeAllUserRefreshTokens(ctx, oldUser.ID)
+		}
+		return nil
 	})
 	if err != nil {
 		return fmt.Errorf("failed to update user with ID %s: %w", req.ID, err)
@@ -319,11 +327,8 @@ func (s *userService) createDefaultAdmin(ctx context.Context) error {
 	adminPassword := utils.GetEnv("ADMIN_PASSWORD", "")
 	adminName := utils.GetEnv("ADMIN_USER", "System Administrator")
 
-	if adminPassword == "" {
-		adminPassword = utils.GenerateStrongPassword(16)
-		fmt.Fprintf(os.Stderr, "Generated random admin password. Set ADMIN_PASSWORD to avoid this.\n")
-	} else if !utils.IsValidPassword(adminPassword) {
-		slog.Warn("ADMIN_PASSWORD does not meet complexity requirements (min 8 chars, uppercase, lowercase, digit, special char)")
+	if !utils.IsValidPassword(adminPassword) || len(adminPassword) > 72 {
+		return fmt.Errorf("ADMIN_PASSWORD is required for bootstrap and must contain 8 to 72 bytes, uppercase, lowercase, digit, and a supported special character")
 	}
 
 	// Check if user with this email already exists
@@ -332,8 +337,7 @@ func (s *userService) createDefaultAdmin(ctx context.Context) error {
 		return fmt.Errorf("failed to verify admin email uniqueness: %w", err)
 	}
 	if existingCount > 0 {
-		slog.Info("User with email already exists, skipping admin creation", "email", adminEmail)
-		return nil
+		return fmt.Errorf("bootstrap admin email is already in use; recover an existing admin or choose an unused ADMIN_EMAIL")
 	}
 
 	// Hash password
@@ -499,60 +503,62 @@ func (s *userService) LoginOIDC(ctx context.Context, req OIDCLoginRequest) (*db.
 	return &user, nil
 }
 
-func (s *userService) UpdateChannelConfig(ctx context.Context, userID uuid.UUID, slackDest, teamsUrl, notificationEmail string) (*db.ClaimctlUser, error) {
+func (s *userService) UpdateChannelConfig(ctx context.Context, userID uuid.UUID, slackDest, teamsUrl, notificationEmail string) (*AdminUserResponse, error) {
 	updatedUser, err := s.db.UpdateUserChannelConfig(ctx, db.UpdateUserChannelConfigParams{
-		ID:               userID,
-		SlackDestination: pgtype.Text{String: slackDest, Valid: slackDest != ""},
-		TeamsWebhookUrl:  pgtype.Text{String: teamsUrl, Valid: teamsUrl != ""},
+		ID:                userID,
+		SlackDestination:  pgtype.Text{String: slackDest, Valid: slackDest != ""},
+		TeamsWebhookUrl:   pgtype.Text{String: teamsUrl, Valid: teamsUrl != ""},
 		NotificationEmail: pgtype.Text{String: notificationEmail, Valid: notificationEmail != ""},
 	})
 	if err != nil {
 		return nil, fmt.Errorf("failed to update user channel config: %w", err)
 	}
-	return &updatedUser, nil
+	return adminUserResponse(updatedUser), nil
 }
 
 func (s *userService) UpdatePassword(ctx context.Context, userID uuid.UUID, currentPassword, newPassword string) error {
-	user, err := s.db.FindUserById(ctx, userID)
-	if err != nil {
-		return fmt.Errorf("user not found")
-	}
+	return s.store.ExecTx(ctx, func(q db.Querier) error {
+		user, err := q.FindUserByIdForUpdate(ctx, userID)
+		if err != nil {
+			return fmt.Errorf("user not found")
+		}
 
-	if user.AuthProvider != "local" {
-		return fmt.Errorf("password change is not available for %s users", user.AuthProvider)
-	}
+		if user.AuthProvider != "local" {
+			return fmt.Errorf("password change is not available for %s users", user.AuthProvider)
+		}
+		if user.Status != "active" {
+			return ErrAccessDenied
+		}
 
-	// Verify current password
-	hashedPassword, err := s.db.GetPasswordById(ctx, user.ID)
-	if err != nil {
-		return fmt.Errorf("failed to retrieve password")
-	}
+		// Verify current password
+		hashedPassword, err := q.GetPasswordById(ctx, user.ID)
+		if err != nil {
+			return fmt.Errorf("failed to retrieve password")
+		}
 
-	if !utils.VerifyPassword(currentPassword, hashedPassword) {
-		return fmt.Errorf("incorrect current password")
-	}
+		if !utils.VerifyPassword(currentPassword, hashedPassword) {
+			return fmt.Errorf("incorrect current password")
+		}
 
-	// Validation for new password
-	if !utils.IsValidPassword(newPassword) {
-		return fmt.Errorf(
-			"New password must be at least 8 characters long and contain uppercase, lowercase, and special character",
-		)
-	}
+		// Validation for new password
+		if !utils.IsValidPassword(newPassword) {
+			return fmt.Errorf(
+				"New password must be at least 8 characters long and contain uppercase, lowercase, and special character",
+			)
+		}
 
-	// Hash new password
-	newHashedPassword, err := bcrypt.GenerateFromPassword([]byte(newPassword), bcrypt.DefaultCost)
-	if err != nil {
-		return fmt.Errorf("failed to hash new password: %w", err)
-	}
+		// Hash new password
+		newHashedPassword, err := bcrypt.GenerateFromPassword([]byte(newPassword), bcrypt.DefaultCost)
+		if err != nil {
+			return fmt.Errorf("failed to hash new password: %w", err)
+		}
 
-	// Update password in DB
-	err = s.db.UpdateUserPassword(ctx, db.UpdateUserPasswordParams{
-		Password: string(newHashedPassword),
-		ID:       userID,
+		if err := q.UpdateUserPassword(ctx, db.UpdateUserPasswordParams{Password: string(newHashedPassword), ID: userID}); err != nil {
+			return fmt.Errorf("failed to update password: %w", err)
+		}
+		if err := q.RevokeAllUserRefreshTokens(ctx, userID); err != nil {
+			return fmt.Errorf("failed to revoke refresh tokens: %w", err)
+		}
+		return nil
 	})
-	if err != nil {
-		return fmt.Errorf("failed to update password: %w", err)
-	}
-
-	return nil
 }

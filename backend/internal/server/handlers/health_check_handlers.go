@@ -37,7 +37,7 @@ func (h *HealthCheckHandler) GetHealthConfig(c *fiber.Ctx) error {
 		return nil
 	}
 
-	config, err := h.healthCheckService.GetHealthConfig(c.Context(), id)
+	config, err := h.healthCheckService.GetHealthConfig(c.UserContext(), id)
 	if err != nil {
 		if err == sql.ErrNoRows {
 			return c.Status(fiber.StatusNotFound).JSON(fiber.Map{
@@ -98,11 +98,11 @@ func (h *HealthCheckHandler) UpsertHealthConfig(c *fiber.Ctx) error {
 		CheckType:       req.CheckType,
 		Target:          req.Target,
 		IntervalSeconds: pgtype.Int4{Int32: req.IntervalSeconds, Valid: true},
-		TimeoutSeconds: pgtype.Int4{Int32: req.TimeoutSeconds, Valid: true},
-		RetryCount: pgtype.Int4{Int32: req.RetryCount, Valid: true},
+		TimeoutSeconds:  pgtype.Int4{Int32: req.TimeoutSeconds, Valid: true},
+		RetryCount:      pgtype.Int4{Int32: req.RetryCount, Valid: true},
 	}
 
-	config, err := h.healthCheckService.UpsertHealthConfig(c.Context(), params)
+	config, err := h.healthCheckService.UpsertHealthConfig(c.UserContext(), params)
 	if err != nil {
 		slog.Error("Failed to upsert health config", "error", err)
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
@@ -120,7 +120,7 @@ func (h *HealthCheckHandler) DeleteHealthConfig(c *fiber.Ctx) error {
 		return nil
 	}
 
-	if err := h.healthCheckService.DeleteHealthConfig(c.Context(), id); err != nil {
+	if err := h.healthCheckService.DeleteHealthConfig(c.UserContext(), id); err != nil {
 		slog.Error("Failed to delete health config", "error", err)
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
 			"error": "Failed to delete health configuration",
@@ -137,7 +137,7 @@ func (h *HealthCheckHandler) GetHealthStatus(c *fiber.Ctx) error {
 		return nil
 	}
 
-	status, err := h.healthCheckService.GetHealthStatus(c.Context(), id)
+	status, err := h.healthCheckService.GetHealthStatus(c.UserContext(), id)
 	if err != nil {
 		if err == sql.ErrNoRows {
 			return c.Status(fiber.StatusNotFound).JSON(fiber.Map{
@@ -168,7 +168,7 @@ func (h *HealthCheckHandler) GetHealthHistory(c *fiber.Ctx) error {
 		}
 	}
 
-	history, err := h.healthCheckService.GetHealthHistory(c.Context(), id, limit)
+	history, err := h.healthCheckService.GetHealthHistory(c.UserContext(), id, limit)
 	if err != nil {
 		slog.Error("Failed to get health history", "error", err)
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
@@ -186,7 +186,7 @@ func (h *HealthCheckHandler) TriggerHealthCheck(c *fiber.Ctx) error {
 		return nil
 	}
 
-	if err := h.healthCheckService.ExecuteCheck(c.Context(), id); err != nil {
+	if err := h.healthCheckService.ExecuteCheck(c.UserContext(), id); err != nil {
 		slog.Error("Failed to execute health check", "error", err)
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
 			"error": "Failed to execute health check",

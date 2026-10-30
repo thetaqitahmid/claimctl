@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/spf13/pflag"
 	"github.com/spf13/viper"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -70,50 +71,43 @@ func TestRootCmdFlags(t *testing.T) {
 }
 
 func TestInitConfig(t *testing.T) {
-	tests := []struct {
-		name          string
-		setupConfig   func() string
-		expectedError bool
-	}{
-		{
-			name: "Config file specified",
-			setupConfig: func() string {
-				tempDir := t.TempDir()
-				configFile := filepath.Join(tempDir, "config.yaml")
-				err := os.WriteFile(configFile, []byte("url: http://test.example.com\ntoken: test-token"), 0644)
-				require.NoError(t, err)
-				return configFile
-			},
-			expectedError: false,
-		},
-		{
-			name: "Default config locations checked",
-			setupConfig: func() string {
-				_, err := os.UserHomeDir()
-				require.NoError(t, err)
-				return "" // Use default config locations
-			},
-			expectedError: false,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			// Reset viper state
+	previousSettings := viper.AllSettings()
+	previousFile, previousError := cfgFile, configErr
+	t.Cleanup(func() {
+		viper.Reset()
+		require.NoError(t, viper.MergeConfigMap(previousSettings))
+		rootCmd.PersistentFlags().VisitAll(func(flag *pflag.Flag) { _ = viper.BindPFlag(flag.Name, flag) })
+		cfgFile, configErr = previousFile, previousError
+	})
+	for _, kind := range []string{"yaml", "json", "missing", "malformed", "default", "insecure"} {
+		t.Run(kind, func(t *testing.T) {
 			viper.Reset()
-
-			configFile := tt.setupConfig()
-			if configFile != "" {
-				cfgFile = configFile
+			directory := t.TempDir()
+			t.Setenv("XDG_CONFIG_HOME", directory)
+			cfgFile = filepath.Join(directory, "config."+kind)
+			switch kind {
+			case "yaml":
+				require.NoError(t, os.WriteFile(cfgFile, []byte("url: https://example.com\ntoken: secret"), 0600))
+			case "json":
+				require.NoError(t, os.WriteFile(cfgFile, []byte(`{"url":"https://example.com","token":"secret"}`), 0600))
+			case "malformed":
+				cfgFile = filepath.Join(directory, "config.json")
+				require.NoError(t, os.WriteFile(cfgFile, []byte(`{"broken"`), 0600))
+			case "insecure":
+				cfgFile = filepath.Join(directory, "config.json")
+				require.NoError(t, os.WriteFile(cfgFile, []byte(`{"token":"secret"}`), 0644))
+			case "default":
+				cfgFile = ""
 			}
-
-			// This should not panic
-			assert.NotPanics(t, func() {
-				initConfig()
-			})
-
-			// Verify viper was configured
-			assert.NotNil(t, viper.Get("url"))
+			initConfig()
+			if kind == "missing" || kind == "malformed" || kind == "insecure" {
+				require.Error(t, configErr)
+			} else {
+				require.NoError(t, configErr)
+			}
+			if kind == "json" || kind == "yaml" {
+				require.Equal(t, "https://example.com", viper.GetString("url"))
+			}
 		})
 	}
 }

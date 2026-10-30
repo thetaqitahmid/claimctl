@@ -3,6 +3,8 @@ package connection
 import (
 	"context"
 	"fmt"
+	"net"
+	"net/url"
 	"time"
 
 	"github.com/exaring/otelpgx"
@@ -14,22 +16,18 @@ import (
 
 type DBConn = pgxpool.Pool
 
-var (
-	dataSourceName = utils.GetEnv("DATABASE_URL", "")
-	dbUser         = utils.GetEnv("DB_USER", "")
-	dbPassword     = utils.GetEnv("DB_PASSWORD", "")
-	dbHost         = utils.GetEnv("DB_HOST", "")
-	dbPort         = utils.GetEnv("DB_PORT", "")
-	dbName         = utils.GetEnv("DB_NAME", "")
-	dbSSLMode      = utils.GetEnv("SSL_MODE", "disable")
-)
+func DatabaseURL() string {
+	if configured := utils.GetEnv("DATABASE_URL", ""); configured != "" {
+		return configured
+	}
+	address := net.JoinHostPort(utils.GetEnv("DB_HOST", ""), utils.GetEnv("DB_PORT", "5432"))
+	query := url.Values{"sslmode": []string{utils.GetEnv("SSL_MODE", "disable")}}
+	return (&url.URL{Scheme: "postgresql", User: url.UserPassword(utils.GetEnv("DB_USER", ""), utils.GetEnv("DB_PASSWORD", "")), Host: address, Path: "/" + utils.GetEnv("DB_NAME", ""), RawQuery: query.Encode()}).String()
+}
 
 // CreateDBSession initializes a DB connection and returns the db session
 func CreateDBSession() (*DBConn, error) {
-	if dataSourceName == "" {
-		dataSourceName = fmt.Sprintf("postgresql://%s:%s@%s:%s/%s?sslmode=%s",
-			dbUser, dbPassword, dbHost, dbPort, dbName, dbSSLMode)
-	}
+	dataSourceName := DatabaseURL()
 	config, err := pgxpool.ParseConfig(dataSourceName)
 	if err != nil {
 		return nil, fmt.Errorf("error parsing database config")
@@ -61,7 +59,8 @@ func CreateDBSession() (*DBConn, error) {
 
 	// Run migrations
 	if err := RunMigrations("file://./migrations", dataSourceName); err != nil {
-		panic(err)
+		pool.Close()
+		return nil, fmt.Errorf("failed to migrate database: %w", err)
 	}
 
 	// Ensure admin user exists

@@ -27,6 +27,8 @@ type ClaimctlApiToken struct {
 	CreatedAt  pgtype.Timestamptz `json:"createdAt"`
 	ExpiresAt  pgtype.Timestamptz `json:"expiresAt"`
 	LastUsedAt pgtype.Timestamptz `json:"lastUsedAt"`
+	Scopes     []string           `json:"scopes"`
+	SpaceIds   []uuid.UUID        `json:"spaceIds"`
 }
 
 type ClaimctlAuditLog struct {
@@ -38,6 +40,21 @@ type ClaimctlAuditLog struct {
 	Changes    []byte      `json:"changes"`
 	IpAddress  pgtype.Text `json:"ipAddress"`
 	CreatedAt  int64       `json:"createdAt"`
+}
+
+type ClaimctlBundleIdempotency struct {
+	UserID      uuid.UUID `json:"userId"`
+	Key         string    `json:"key"`
+	Fingerprint string    `json:"fingerprint"`
+	Result      []byte    `json:"result"`
+}
+
+type ClaimctlClaimIdempotency struct {
+	UserID        uuid.UUID `json:"userId"`
+	Key           string    `json:"key"`
+	Fingerprint   string    `json:"fingerprint"`
+	ReservationID uuid.UUID `json:"reservationId"`
+	Result        []byte    `json:"result"`
 }
 
 type ClaimctlGroup struct {
@@ -64,6 +81,20 @@ type ClaimctlMaintenanceAuditLog struct {
 	Reason        pgtype.Text `json:"reason"`
 }
 
+type ClaimctlRateLimit struct {
+	Key       string             `json:"key"`
+	Count     int64              `json:"count"`
+	ExpiresAt pgtype.Timestamptz `json:"expiresAt"`
+}
+
+type ClaimctlRealtimeEvent struct {
+	ID         int64              `json:"id"`
+	EventType  string             `json:"eventType"`
+	ResourceID pgtype.UUID        `json:"resourceId"`
+	SpaceID    pgtype.UUID        `json:"spaceId"`
+	CreatedAt  pgtype.Timestamptz `json:"createdAt"`
+}
+
 type ClaimctlRefreshToken struct {
 	ID        uuid.UUID          `json:"id"`
 	UserID    uuid.UUID          `json:"userId"`
@@ -86,6 +117,9 @@ type ClaimctlReservation struct {
 	UpdatedAt        pgtype.Int8        `json:"updatedAt"`
 	ScheduledEndTime pgtype.Timestamptz `json:"scheduledEndTime"`
 	Duration         pgtype.Interval    `json:"duration"`
+	LeaseDuration    pgtype.Interval    `json:"leaseDuration"`
+	LeaseExpiresAt   pgtype.Timestamptz `json:"leaseExpiresAt"`
+	HardEndTime      pgtype.Timestamptz `json:"hardEndTime"`
 }
 
 type ClaimctlReservationHistory struct {
@@ -145,6 +179,12 @@ type ClaimctlSecret struct {
 	Description pgtype.Text `json:"description"`
 	CreatedAt   pgtype.Int8 `json:"createdAt"`
 	UpdatedAt   pgtype.Int8 `json:"updatedAt"`
+}
+
+type ClaimctlSharedStorage struct {
+	Key       string             `json:"key"`
+	Value     []byte             `json:"value"`
+	ExpiresAt pgtype.Timestamptz `json:"expiresAt"`
 }
 
 type ClaimctlSpace struct {
@@ -213,4 +253,27 @@ type ClaimctlWebhookLog struct {
 	ResponseBody string           `json:"responseBody"`
 	DurationMs   int32            `json:"durationMs"`
 	CreatedAt    pgtype.Timestamp `json:"createdAt"`
+}
+
+type ClaimctlWebhookOutbox struct {
+	ID          uuid.UUID          `json:"id"`
+	WebhookID   uuid.UUID          `json:"webhookId"`
+	ResourceID  uuid.UUID          `json:"resourceId"`
+	Event       string             `json:"event"`
+	Hook        []byte             `json:"hook"`
+	Reservation []byte             `json:"reservation"`
+	State       string             `json:"state"`
+	Attempts    int32              `json:"attempts"`
+	AvailableAt pgtype.Timestamptz `json:"availableAt"`
+	LeaseUntil  pgtype.Timestamptz `json:"leaseUntil"`
+	Fence       pgtype.UUID        `json:"fence"`
+	LastStatus  int32              `json:"lastStatus"`
+	LastError   string             `json:"lastError"`
+	CreatedAt   pgtype.Timestamptz `json:"createdAt"`
+}
+
+type ClaimctlWorkerLease struct {
+	Name       string             `json:"name"`
+	Fence      uuid.UUID          `json:"fence"`
+	LeaseUntil pgtype.Timestamptz `json:"leaseUntil"`
 }

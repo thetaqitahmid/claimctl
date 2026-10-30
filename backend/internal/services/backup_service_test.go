@@ -2,6 +2,7 @@ package services
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"testing"
 	"time"
@@ -121,7 +122,14 @@ func (r *TestRows) Next() bool {
 	}
 	return false
 }
-func (r *TestRows) Scan(dest ...any) error { return nil } // Not used by service
+func (r *TestRows) Scan(dest ...any) error {
+	raw, err := json.Marshal(r.data[r.idx-1])
+	if err != nil {
+		return err
+	}
+	*dest[0].(*[]byte) = raw
+	return nil
+}
 func (r *TestRows) Values() ([]any, error) {
 	if r.idx > 0 && r.idx <= len(r.data) {
 		rowMap := r.data[r.idx-1]
@@ -161,11 +169,11 @@ func TestBackupService_CreateBackup(t *testing.T) {
 		if tq.Name == "api_tokens" {
 			// Create SPECIFIC rows instance for this call
 			rows := NewTestRows(apiTokenData, []string{"id", "user_id", "name", "token_hash", "created_at"})
-			mockPool.On("Query", ctx, tq.Query, mock.Anything).Return(rows, nil).Once()
+			mockPool.On("Query", ctx, "SELECT row_to_json(backup_row) FROM ("+tq.Query+") AS backup_row", mock.Anything).Return(rows, nil).Once()
 		} else {
 			// Create NEW rows instance for each call
 			rows := NewTestRows([]map[string]interface{}{}, []string{"id"})
-			mockPool.On("Query", ctx, tq.Query, mock.Anything).Return(rows, nil).Once()
+			mockPool.On("Query", ctx, "SELECT row_to_json(backup_row) FROM ("+tq.Query+") AS backup_row", mock.Anything).Return(rows, nil).Once()
 		}
 	}
 
@@ -178,8 +186,8 @@ func TestBackupService_CreateBackup(t *testing.T) {
 
 	// Verify API Tokens were backed up correctly
 	assert.Len(t, backup.APITokens, 1)
-	assert.Equal(t, testutils.TestUUID(1), backup.APITokens[0]["id"])
-	assert.Equal(t, int32(5), backup.APITokens[0]["user_id"])
+	assert.Equal(t, testutils.TestUUID(1).String(), backup.APITokens[0]["id"])
+	assert.Equal(t, float64(5), backup.APITokens[0]["user_id"])
 	assert.Equal(t, "Test Token", backup.APITokens[0]["name"])
 
 	mockPool.AssertExpectations(t)
@@ -205,6 +213,10 @@ func TestBackupService_RestoreBackup(t *testing.T) {
 
 	// 1. Transaction Begin
 	mockPool.On("Begin", ctx).Return(mockTx, nil).Once()
+	mockTx.On("Exec", ctx, "SET LOCAL lock_timeout = '5s'", mock.Anything).Return(pgconn.CommandTag{}, nil).Once()
+	mockTx.On("Exec", ctx, "SELECT pg_advisory_xact_lock(725025)", mock.Anything).Return(pgconn.CommandTag{}, nil).Once()
+	mockTx.On("Exec", ctx, "SET LOCAL claimctl.restoring = 'on'", mock.Anything).Return(pgconn.CommandTag{}, nil).Once()
+	mockTx.On("Exec", ctx, "INSERT INTO claimctl.realtime_events(event_type) VALUES ('resync')", mock.Anything).Return(pgconn.CommandTag{}, nil).Once()
 
 	// 2. Truncate Tables
 	for _, table := range truncateOrder {
@@ -216,13 +228,6 @@ func TestBackupService_RestoreBackup(t *testing.T) {
 	mockTx.On("Exec", ctx, mock.MatchedBy(func(sql string) bool {
 		return len(sql) >= 31 && sql[:31] == "INSERT INTO claimctl.api_tokens"
 	}), mock.Anything).Return(pgconn.CommandTag{}, nil).Once()
-
-	// 4. Sequence Reset
-	// Match "SELECT setval"
-	// We expect 13 sequence resets
-	mockTx.On("Exec", ctx, mock.MatchedBy(func(sql string) bool {
-		return len(sql) >= 13 && sql[:13] == "SELECT setval"
-	}), mock.Anything).Return(pgconn.CommandTag{}, nil).Times(13)
 
 	// 5. Commit
 	mockTx.On("Commit", ctx).Return(nil).Once()

@@ -4,6 +4,9 @@ SELECT * FROM claimctl.users;
 -- name: FindUserById :one
 SELECT * FROM claimctl.users WHERE id=$1;
 
+-- name: FindUserByIdForUpdate :one
+SELECT * FROM claimctl.users WHERE id=$1 FOR UPDATE;
+
 -- name: FindUserByEmail :one
 SELECT * FROM claimctl.users WHERE email=$1;
 

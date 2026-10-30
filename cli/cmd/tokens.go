@@ -7,8 +7,6 @@ import (
 	"text/tabwriter"
 	"time"
 
-	"claimctl-cli/pkg/api"
-
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 )
@@ -22,7 +20,7 @@ var listTokensCmd = &cobra.Command{
 	Use:   "list",
 	Short: "List your API tokens",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		client, err := api.NewClient(viper.GetString("url"), viper.GetString("token"), viper.GetBool("netrc"))
+		client, err := newClient(cmd)
 		if err != nil {
 			return fmt.Errorf("error creating client: %w", err)
 		}
@@ -60,6 +58,8 @@ var listTokensCmd = &cobra.Command{
 var (
 	tokenName      string
 	tokenExpiresIn string
+	tokenScopes    []string
+	tokenSpaces    []string
 )
 
 var generateTokenCmd = &cobra.Command{
@@ -70,12 +70,12 @@ var generateTokenCmd = &cobra.Command{
 			return fmt.Errorf("--name is required")
 		}
 
-		client, err := api.NewClient(viper.GetString("url"), viper.GetString("token"), viper.GetBool("netrc"))
+		client, err := newClient(cmd)
 		if err != nil {
 			return fmt.Errorf("error creating client: %w", err)
 		}
 
-		token, err := client.GenerateToken(tokenName, tokenExpiresIn)
+		token, err := client.GenerateScopedToken(tokenName, tokenExpiresIn, tokenScopes, tokenSpaces)
 		if err != nil {
 			return fmt.Errorf("error generating token: %w", err)
 		}
@@ -98,7 +98,7 @@ var revokeTokenCmd = &cobra.Command{
 	Short: "Revoke an API token",
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		client, err := api.NewClient(viper.GetString("url"), viper.GetString("token"), viper.GetBool("netrc"))
+		client, err := newClient(cmd)
 		if err != nil {
 			return fmt.Errorf("error creating client: %w", err)
 		}
@@ -122,4 +122,6 @@ func init() {
 
 	generateTokenCmd.Flags().StringVar(&tokenName, "name", "", "Token name")
 	generateTokenCmd.Flags().StringVar(&tokenExpiresIn, "expires-in", "", "Expiry duration (e.g. 30d, 1y)")
+	generateTokenCmd.Flags().StringSliceVar(&tokenScopes, "scopes", nil, "Explicit comma-separated token scopes")
+	generateTokenCmd.Flags().StringSliceVar(&tokenSpaces, "space-ids", nil, "Restrict token to comma-separated space UUIDs")
 }

@@ -6,9 +6,7 @@ import (
 	"log/slog"
 	"time"
 
-	jwtware "github.com/gofiber/contrib/jwt"
 	"github.com/gofiber/fiber/v2"
-	"github.com/gofiber/fiber/v2/middleware/limiter"
 
 	// Import Swagger dependency
 	fiberSwagger "github.com/swaggo/fiber-swagger"
@@ -43,12 +41,13 @@ func SetupRoutes(ctx context.Context, app *fiber.App, dbConn *connection.DBConn,
 	preferenceService := services.NewPreferenceService(dbQueries)
 	notificationService := services.NewNotificationService(dbQueries, dispatchers, preferenceService)
 
-	realtimeService := services.NewRealtimeService()
+	realtimeService := services.NewSharedRealtimeService(ctx, dbQueries)
 	resourceService := services.NewResourceService(dbQueries, realtimeService)
 	userService := services.NewUserService(dbQueries)
 	reservationHistoryService := services.NewReservationHistoryService(dbQueries)
 	secretService := services.NewSecretService(dbQueries, encryptionKey)
 	webhookService := services.NewWebhookService(dbQueries, secretService, encryptionKey)
+	webhookService.StartDelivery(ctx)
 	apiTokenService := services.NewAPITokenService(dbQueries)
 	preferenceHandler := handlers.NewPreferenceHandler(preferenceService)
 	backupHandler := handlers.NewBackupHandler(backupService)
@@ -61,7 +60,7 @@ func SetupRoutes(ctx context.Context, app *fiber.App, dbConn *connection.DBConn,
 
 	// Workers
 	expiryWorker := workers.NewExpiryWorker(reservationService)
-	expiryWorker.Start(ctx, 1 * time.Minute)
+	expiryWorker.Start(ctx, 1*time.Minute)
 
 	// Start health check monitoring
 	if err := healthCheckService.StartMonitoring(ctx); err != nil {
@@ -84,7 +83,7 @@ func SetupRoutes(ctx context.Context, app *fiber.App, dbConn *connection.DBConn,
 	webhookHandler := handlers.NewWebhookHandler(webhookService)
 	spaceHandler := handlers.NewSpaceHandler(spaceService, auditService)
 	groupHandler := handlers.NewGroupHandler(groupService, auditService) // New Group Handler
-	realtimeHandler := handlers.NewRealtimeHandler(realtimeService)
+	realtimeHandler := handlers.NewRealtimeHandler(realtimeService, dbQueries)
 	settingsHandler := handlers.NewSettingsHandler(settingsService, auditService)
 	apiTokenHandler := handlers.NewAPITokenHandler(apiTokenService)
 	healthCheckHandler := handlers.NewHealthCheckHandler(healthCheckService)
@@ -119,34 +118,16 @@ func SetupRoutes(ctx context.Context, app *fiber.App, dbConn *connection.DBConn,
 	})
 
 	// Register API Token Middleware BEFORE JWT
-	api.Use(APITokenMiddleware(apiTokenService))
+	api.Use(BearerAuthentication(apiTokenService, dbQueries, publicKey))
+	if utils.GetEnvAsBool("ENABLE_CSRF", true) {
+		api.Use(CSRFMiddleware(NewPostgresStorage(dbQueries)))
+	}
+	api.Get("/auth/csrf", func(c *fiber.Ctx) error { return c.JSON(fiber.Map{"csrfToken": c.Locals("csrf")}) })
 
 	// Rate limiter for authentication routes
-	authLimiter := limiter.New(limiter.Config{
-		Max:        5,
-		Expiration: 1 * time.Minute,
-		KeyGenerator: func(c *fiber.Ctx) string {
-			return c.IP()
-		},
-		LimitReached: func(c *fiber.Ctx) error {
-			return c.Status(fiber.StatusTooManyRequests).JSON(fiber.Map{
-				"error": "Too many login attempts. Please try again later.",
-			})
-		},
-	})
+	authLimiter := AtomicRateLimiter(dbQueries, "login", 5, time.Minute)
 
-	refreshLimiter := limiter.New(limiter.Config{
-		Max:        10,
-		Expiration: 1 * time.Minute,
-		KeyGenerator: func(c *fiber.Ctx) string {
-			return c.IP()
-		},
-		LimitReached: func(c *fiber.Ctx) error {
-			return c.Status(fiber.StatusTooManyRequests).JSON(fiber.Map{
-				"error": "Too many refresh attempts. Please log in again.",
-			})
-		},
-	})
+	refreshLimiter := AtomicRateLimiter(dbQueries, "refresh", 10, time.Minute)
 
 	api.Post("/login", authLimiter, userHandler.Login)
 	api.Post("/logout", userHandler.Logout)
@@ -155,24 +136,8 @@ func SetupRoutes(ctx context.Context, app *fiber.App, dbConn *connection.DBConn,
 	api.Get("/auth/oidc/callback", userHandler.CallbackOIDC)
 	api.Post("/auth/refresh", refreshLimiter, userHandler.RefreshToken)
 
-	api.Use(jwtware.New(jwtware.Config{
-		SigningKey: jwtware.SigningKey{
-			JWTAlg: jwtware.RS256,
-			Key:    publicKey,
-		},
-		TokenLookup: "cookie:access_token,header:Authorization",
-		ErrorHandler: func(c *fiber.Ctx, err error) error {
-			slog.Warn("JWT authentication failed", "error", err)
-			return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
-				"error": "Unauthorized",
-			})
-		},
-		ContextKey: "user",
-		Filter: func(c *fiber.Ctx) bool {
-			// Skip JWT check if API Token authentication was successful
-			return c.Locals("user_record") != nil
-		},
-	}))
+	api.Use(CookieAuthentication(dbQueries, publicKey))
+	api.Use(AuthorizationMiddleware(dbQueries))
 
 	// endpoint for getting the current user
 	api.Get("/me", userHandler.GetMe)
@@ -213,10 +178,12 @@ func SetupRoutes(ctx context.Context, app *fiber.App, dbConn *connection.DBConn,
 	// Webhooks (Admin Only)
 	webhooks := api.Group("/webhooks", AdminMiddleware())
 	webhooks.Get("/", webhookHandler.ListWebhooks)
+	webhooks.Get("/deliveries/dead", webhookHandler.ListDeadDeliveries)
 	webhooks.Post("/", webhookHandler.CreateWebhook)
 	webhooks.Put("/:id", webhookHandler.UpdateWebhook)
 	webhooks.Delete("/:id", webhookHandler.DeleteWebhook)
 	webhooks.Get("/:id/logs", webhookHandler.GetWebhookLogs)
+	webhooks.Get("/:id/deliveries", webhookHandler.ListDeliveries)
 
 	// Secrets (Admin Only)
 	secrets := api.Group("/secrets", AdminMiddleware())
@@ -228,12 +195,18 @@ func SetupRoutes(ctx context.Context, app *fiber.App, dbConn *connection.DBConn,
 	// Resource Webhooks (Admin Only)
 	api.Post("/resources/:resourceId/webhooks", AdminMiddleware(), webhookHandler.AddResourceWebhook)
 	api.Delete("/resources/:resourceId/webhooks/:webhookId", AdminMiddleware(), webhookHandler.RemoveResourceWebhook)
-	api.Get("/resources/:resourceId/webhooks", webhookHandler.GetResourceWebhooks)
+	api.Get("/resources/:resourceId/webhooks", AdminMiddleware(), webhookHandler.GetResourceWebhooks)
 
 	// Reservations: Manage resource reservations
 	api.Get("/reservations", reservationHandler.GetUserReservations)
 	api.Post("/reservations", reservationHandler.CreateReservation)
 	api.Post("/reservations/timed", reservationHandler.CreateTimedReservation)
+	api.Post("/reservations/claim", reservationHandler.Claim)
+	api.Post("/reservations/bundle", reservationHandler.Bundle)
+	api.Post("/reservations/:id/renew", reservationHandler.Renew)
+	api.Get("/resources/:id/metrics", reservationHandler.Metrics)
+	admin.Get("/metrics", reservationHandler.AggregateMetrics)
+	api.Get("/reservations/policy", reservationHandler.Policy)
 	api.Get("/reservations/:id", reservationHandler.GetReservation)
 	api.Patch("/reservations/:id/activate", AdminMiddleware(), reservationHandler.ActivateReservation)
 	api.Patch("/reservations/:id/complete", reservationHandler.CompleteReservation)

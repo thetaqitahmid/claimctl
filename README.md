@@ -1,245 +1,262 @@
 # claimctl
 
-[![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](https://www.apache.org/licenses/LICENSE-2.0)
+[![License: Apache 2.0][license-badge]][apache-license]
+
+[license-badge]: https://img.shields.io/badge/License-Apache_2.0-blue.svg
+[apache-license]: https://www.apache.org/licenses/LICENSE-2.0
+
+**Coordinate access to shared test hardware and environments for developers
+and CI jobs.**
+
+claimctl is a self-hosted resource reservation tool with a web UI, CLI, and
+API. See who is using a resource, claim it for a limited time, and queue when
+it is busy. Give people and automation a shared view of ownership instead
+of coordinating through Slack messages, spreadsheets, or separate CI locks.
 
 > [!IMPORTANT]
-> This project is currently under development. The code may change frequently
-> and may not be stable. Please prepare for breaking changes.
+> claimctl is under active development. Breaking changes may occur. Evaluate
+> it with noncritical resources before relying on it for production workflows.
 
-claimctl is a resource management tool designed to streamline the
-reservation and organization of resources within teams or organizations. It
-allows users to view, reserve, and release resources, making it easier to manage
-availability and scheduling in a centralized and efficient manner. claimctl
-is ideal for workplaces, libraries, and labs where resources such as servers,
-testbeds, books, equipment, meeting rooms, or other shared assets need to be
-tracked and managed collaboratively.
+## When to use claimctl
 
-## Features
+claimctl is intended for teams that share scarce resources and need exclusive
+access while working:
 
-- **Browse Available Resources**: Quickly see the resources available and their
-  types.
-- **Reserve and Release Resources**: Easily book resources when needed and
-  release them after use.
-- **Advanced Resource Filtering**: Efficiently find resources by type, tags,
-  labels, or keyword search within the data table.
-- **Resource Organization (Spaces)**: Logically organize resources into
-  distinct spaces for easier management.
-- **Access Control Groups**: Manage user access and permissions through
-  configurable groups.
-- **Detailed Resource View**: Access detailed information about each resource,
-  including its name, type, status, and labels.
-- **Track Reservation Status**: Monitor who currently has reserved a resource,
-  along with easy-to-use Reserve and Release buttons.
-- **Authentication and User Management**: Allow user authentication and access-
-  based resource management.
-- **Resource History**: View previous reservation history to better manage high-
-  demand resources with detailed audit trails.
-- **Maintenance Mode**: Place resources in maintenance mode to prevent new
-  reservations during repairs or updates.
-- **Timed Reservations**: Reserve resources for specific durations (1hr, 2hr,
-  4hr, or custom) with automatic expiry.
-- **Queue System**: Automatic queue management for busy resources with first-
-  come-first-served ordering.
-- **Real-Time Updates**: Live reservation status updates via Server-Sent Events
-  (SSE) for instant notifications.
-- **Multi-channel Notifications**: Support for dispatching notifications via
-  Email, Slack, and Microsoft Teams.
-- **Webhook Integration**: Automate workflows by triggering webhooks on
-  reservation events (create, activate, complete, cancel).
-- **Secret Management**: Securely store API keys and tokens for webhook
-  integrations with encrypted storage.
-- **Comprehensive Audit Logging**: Track system actions, configuration changes,
-  and user behavior for accountability.
-- **System Backup & Restore**: Built-in database backup and restore
-  capabilities for administrators.
-- **Multiple Authentication Methods**: Support for local auth and OpenID
-  Connect (OIDC) for enterprise SSO.
-- **Command-Line Interface**: Full-featured CLI (`claimctl`) for
-  automation, scripting, and headless operations.
-- **Admin Panel**: Comprehensive administration interface for managing users,
-  resources, webhooks, and secrets.
-- **API Token Authentication**: Generate API tokens for programmatic access and
-  CLI usage.
-- **Health Check Monitoring**: Automated monitoring of resource availability
-  with support for ping, HTTP, and TCP checks with configurable intervals and
-  retry logic.
+1. **Test hardware**: Coordinate access to development boards, network
+   appliances, physical servers, or shared testbeds.
+2. **Shared environments**: Track ownership of staging environments,
+   development databases, or test clusters that cannot safely support
+   conflicting changes.
+3. **Manual work and CI**: Let developers and pipeline jobs participate in
+   the same reservation workflow, even when they use different tools.
 
-## Use Cases
+A typical problem: a developer is debugging on a test appliance while a CI
+job tries to reconfigure it. claimctl provides a place to record ownership
+and wait for a turn before starting work.
 
-### 1. **Lab Equipment Scheduling**
+If a lock inside a single CI system already solves your problem, you may not
+need another service. claimctl is most relevant when ownership needs to be
+visible and coordinated across people and tools.
 
-- In lab environments, claimctl allows lab managers and researchers to
-  reserve equipment like microscopes, chemical storage, or other lab-specific
-  resources.
-- Keep track of high-cost equipment and maximize utilization efficiency.
+## How it works
 
-### 2. **CI/CD Pipeline Resource Management**
+1. An administrator adds resources and organizes them into spaces.
+2. A developer or CI job requests a reservation through the UI, CLI, or API.
+3. An available resource can be used immediately; requests for a busy
+   resource enter its queue.
+4. The holder releases the resource when finished. Timed reservations can
+   expire automatically, and the queue advances as resources become free.
+5. Other users can see reservation updates and ownership history.
 
-- Manage shared test environments, build servers, or deployment slots in CI/CD
-  pipelines.
-- Prevent conflicts when multiple teams need access to the same testing
-  infrastructure.
-- Integrate with automation tools via webhooks to trigger environment
-  setup/teardown.
+For example, a developer can reserve a test board through the browser while
+an automated job waits for the same board through the CLI.
 
-### 3. **IoT and Smart Home Integration**
+### What a reservation does not do
 
-- Control IoT devices (smart plugs, lights, locks) when resources are reserved
-  or released.
-- Automate physical access control for labs, studios, or equipment rooms.
-- Use webhooks to integrate with Home Assistant, MQTT, or custom IoT platforms.
+claimctl coordinates ownership **inside claimctl**. It does not, by itself,
+block SSH access, stop a running test, provision infrastructure, or prevent
+someone from using equipment outside the reservation workflow.
 
-### 4. **DevOps and Infrastructure Management**
+Webhooks can connect reservation events to your own setup, teardown, or
+access control automation. Those integrations must implement the actual
+operations and enforcement. Reservation expiry does not guarantee that the
+previous holder's workload has stopped.
 
-- Reserve cloud resources, VMs, or Kubernetes clusters for development and
-  testing.
-- Track usage of shared development databases or staging environments.
-- Automate resource provisioning through webhook integrations with cloud
-  providers.
+The core workflow is **claim, wait, use, and release**, not a calendar for
+booking future time slots. See [Reservations & Queues](docs/RESERVATIONS.md)
+for lifecycle details.
 
-### 5. **Healthcare Equipment Management**
+## Capabilities
 
-- Track and reserve medical equipment such as ultrasound machines, wheelchairs,
-  or diagnostic tools.
-- Monitor equipment health status to ensure availability and reliability.
-- Maintain audit trails for compliance and equipment usage tracking.
+| Area | Available capabilities |
+| --- | --- |
+| Reservations | Timed ownership, automatic expiry, queues, release, history |
+| Resource discovery | Types, labels, filtering, properties, spaces |
+| Team visibility | Web UI, live updates via SSE, maintenance mode |
+| Automation | CLI, API tokens, reservation event webhooks |
+| Access management | Local authentication, OIDC SSO, access groups |
+| Operations | Audit logs, database backup and restore, encrypted secrets |
+| Notifications | Email, Slack, and Microsoft Teams dispatch support |
+| Health monitoring | Ping, HTTP, and TCP checks with retries |
 
-### 6. **Data Center and Server Management**
+Health probes require an explicit egress allowlist. Configure permitted
+networks and ports before enabling checks against your infrastructure.
 
-- Reserve physical servers, network switches, or rack space for maintenance or
-  testing.
-- Monitor server health with automated ping, HTTP, or TCP checks.
-- Coordinate access to shared infrastructure across multiple teams.
-- Integrate with monitoring systems via webhooks for incident response.
+## Try it locally
 
-### 7. **Manufacturing and Production Line Resources**
+This setup builds the application from source using Docker Compose. You
+need Git, Docker Engine, and the Docker Compose plugin; Go and Node.js are
+not required for this container-based evaluation.
 
-- Manage access to production equipment, testing stations, or quality control
-  tools.
-- Schedule equipment maintenance windows with timed reservations.
-- Track equipment utilization and availability across shifts.
+The development configuration uses local HTTP, development database
+credentials, and published ports. **Do not expose it to an untrusted network
+or use it as a production deployment.**
 
-### 8. **Vehicle Fleet Management**
-
-- Reserve company vehicles, delivery trucks, or specialized equipment.
-- Track vehicle availability and usage patterns.
-- Automate notifications when vehicles are reserved or released.
-
-### 9. **Research Facility Resource Sharing**
-
-- Enable researchers to reserve specialized instruments, cleanrooms, or testing
-  facilities.
-- Queue system ensures fair access to high-demand research equipment.
-- Integration with lab management systems via webhooks and API.
-
-## Command-Line Interface
-
-claimctl includes a powerful CLI for automation and scripting:
+### 1. Clone the repository
 
 ```bash
-# Reserve a resource by ID or criteria
-claimctl reserve 123 --duration 2h
-claimctl reserve --type "Desk" --label-expr "dual-monitor"
-
-# Wait in queue for a busy resource
-claimctl reserve 123 --wait --timeout 600
-
-# List and manage resources
-claimctl resources list --type "Meeting Room"
-claimctl resources create --name "Lab 1" --type "Lab"
-claimctl resources history <resource-id>
-claimctl resources maintenance enable <resource-id> --reason "Upgrade"
-
-# Spaces and groups (admin)
-claimctl spaces list
-claimctl groups create --name "DevOps"
-claimctl groups add-member <group-id> <user-id>
-
-# API tokens
-claimctl tokens generate --name "CI Pipeline" --expires-in 30d
-claimctl tokens list
-
-# Webhook management
-claimctl webhooks list
-claimctl webhooks update <webhook-id> --name "Slack Prod"
-claimctl webhooks attach <resource-id> <webhook-id>
-
-# Health check management
-claimctl healthcheck config <resource-id> --type http --target "https://example.com"
-claimctl healthcheck status <resource-id>
-claimctl healthcheck history <resource-id> --limit 20
-
-# Audit logs (admin)
-claimctl audit-logs --limit 100
+git clone https://github.com/thetaqitahmid/claimctl.git
+cd claimctl
 ```
 
-See [CLI Reference](docs/CLI.md) for complete CLI documentation.
+### 2. Set a bootstrap administrator password
+
+In your shell, set a unique password before starting the application:
+
+```bash
+export ADMIN_PASSWORD='ReplaceThisWithYourOwnStrongPassword1!'
+```
+
+Replace the example value. The password must contain 8 to 72 bytes, including
+uppercase and lowercase letters, a digit, and a supported special character
+such as `!`.
+
+### 3. Start the stack
+
+Run this command from the repository root. The inline Compose override
+passes the bootstrap credentials to the backend:
+
+```bash
+docker compose -f docker-compose-dev.yaml -f - up -d --build <<'YAML'
+services:
+  backend:
+    environment:
+      ADMIN_EMAIL: admin@example.com
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:?Set ADMIN_PASSWORD first}
+YAML
+```
+
+The backend applies database migrations and creates an administrator on
+first startup when no administrator exists. The bootstrap password does
+not reset an existing account.
+
+Open <http://localhost:5173> and sign in as `admin@example.com` with the
+password you chose. The backend is available at <http://localhost:3000>.
+
+To inspect startup or stop the stack:
+
+```bash
+docker compose -f docker-compose-dev.yaml logs -f backend
+docker compose -f docker-compose-dev.yaml down
+```
+
+Stopping the stack preserves the database volume. This is an evaluation
+setup: configure persistent encryption keys before storing secrets you
+need to retain across container recreation. See the
+[Encryption Guide](docs/ENCRYPTION.md).
+
+### 4. Exercise the reservation workflow
+
+1. Add a resource such as `Test Board A` from the administration interface.
+2. Reserve it for a short duration.
+3. Use another user account to join the queue for that resource.
+4. Release the first reservation and observe the queue advance.
+5. Review the resource's reservation history.
+
+## Use the CLI
+
+The CLI uses API tokens for authentication. Generate a token from
+**Profile → Tokens** in the web UI and keep it private. For CI, store the
+token in your CI system's secret storage.
+
+To build the CLI from the repository root, use Go matching the version in
+[`cli/go.mod`](cli/go.mod):
+
+```bash
+(cd cli && go build -o claimctl .)
+export CLAIMCTL_URL='http://localhost:3000'
+export CLAIMCTL_TOKEN='<your API token>'
+./cli/claimctl resources list
+```
+
+Copy a resource UUID from the list, then reserve it and wait if it is busy:
+
+```bash
+RESOURCE_ID='<resource UUID from the list>'
+./cli/claimctl reserve "$RESOURCE_ID" --duration 30m --wait --timeout 600
+```
+
+After a successful reservation, use the returned reservation ID to release
+it when your work is finished:
+
+```bash
+./cli/claimctl release '<reservation UUID>'
+```
+
+For automation, start work only after confirming that the reservation is
+active. Arrange cleanup on job completion or failure, and choose a duration
+that covers the work. Expiry is a fallback for abandoned ownership, not a
+substitute for stopping workloads safely.
+
+The CLI also supports discovery by name, type, and label expression:
+
+```bash
+./cli/claimctl reserve --name 'Test Board A' --duration 1h
+./cli/claimctl reserve --type 'Test Board' --label-expr 'arm AND linux'
+./cli/claimctl reservations list
+./cli/claimctl resources history "$RESOURCE_ID"
+```
+
+Selection by type or labels searches for an available matching resource;
+it is not a waiting queue for an entire pool. Use a resource ID to wait
+for a specific busy resource.
+
+See the [CLI Reference](docs/CLI.md) for commands and configuration options,
+and [Webhooks & Automation](docs/WEBHOOKS.md) for event integrations.
+
+## Deployment
+
+The repository includes a production Compose configuration at
+[`docker-compose.prod.yaml`](docker-compose.prod.yaml) and a Helm chart at
+[`charts/claimctl`](charts/claimctl).
+
+Before deploying beyond a local evaluation, configure TLS, database
+credentials, a persistent encryption key, authentication, and backups.
+Review the configuration rather than assuming development defaults are
+suitable for your environment.
+
+See the [Deployment Guide](docs/DEPLOYMENT.md),
+[Authentication Guide](docs/AUTHENTICATION.md),
+[Encryption Guide](docs/ENCRYPTION.md), and [Security Policy](SECURITY.md).
 
 ## Documentation
 
-Comprehensive documentation is available in the `docs/` directory:
+| Guide | Contents |
+| --- | --- |
+| [Resources](docs/RESOURCES.md) | Properties, labels, and organization |
+| [Reservations](docs/RESERVATIONS.md) | Reservation lifecycle and queues |
+| [CLI](docs/CLI.md) | Commands, authentication, and scripting options |
+| [Webhooks](docs/WEBHOOKS.md) | Reservation events and external automation |
+| [Authentication](docs/AUTHENTICATION.md) | Local accounts and OIDC setup |
+| [Administration](docs/ADMINISTRATION.md) | Administrative operations |
+| [Deployment](docs/DEPLOYMENT.md) | Deployment configuration and Helm |
+| [Encryption](docs/ENCRYPTION.md) | Key configuration and encrypted storage |
 
-- [Authentication Guide](docs/AUTHENTICATION.md) - Local and OIDC setup
-- [Reservations & Queue System](docs/RESERVATIONS.md) - How reservations work
-- [Webhooks & Automation](docs/WEBHOOKS.md) - Integrate with external systems
-- [Resource Management](docs/RESOURCES.md) - Managing resources and labels
-- [Administration](docs/ADMINISTRATION.md) - Admin panel features
-- [Deployment Guide](docs/DEPLOYMENT.md) - Docker, Kubernetes, and Helm charts
-- [CLI Reference](docs/CLI.md) - Full CLI documentation and examples
+## Development and contributions
 
-## Prerequisites
+The backend and CLI use Go, the frontend uses React and TypeScript, and
+reservation data is stored in PostgreSQL.
 
-Before building or running the project locally, ensure you have the following
-installed:
+For local development outside containers, see the
+[Backend Development Guide](docs/BACKEND_DEVELOPMENT.md) and
+[Frontend Development Guide](docs/FRONTEND_DEVELOPMENT.md). Use the toolchain
+versions specified by the Go modules and frontend dependencies.
 
-- Go (1.21 or later recommending)
-- Node.js (18 or later recommending)
-- Docker and Docker Compose
-- PostgreSQL (if not using Docker for the database)
-
-## Quick Start
-
-### Using Docker Compose
-
-```bash
-docker-compose up -d
-```
-
-### Using Helm (Kubernetes)
+Run the repository checks with the development dependencies installed:
 
 ```bash
-helm install claimctl ./charts/claimctl
+make test
 ```
 
-See [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) for detailed deployment
-instructions.
+This runs backend and CLI tests, plus frontend lint, tests, and a build.
+See [CONTRIBUTING.md](CONTRIBUTING.md) for contribution guidelines.
 
-## Technology Stack
-
-- **Backend**: Go with PostgreSQL database
-- **Frontend**: React with TypeScript
-- **Authentication**: JWT, OpenID Connect
-- **Real-time**: Server-Sent Events (SSE)
-- **Deployment**: Docker, Kubernetes, Helm
-
-## Development
-
-claimctl includes several `Makefile` commands to simplify development:
-
-### Root Makefile Commands
-
-- `make dev_up`: Start full development environment (backend + frontend + db)
-- `make backend_up` / `make backend_down`: Start/stop backend with database
-- `make frontend_up`: Start frontend only
-- `make db_up` / `make db_down`: Start/stop PostgreSQL container
-- `make migrate_up`: Run database migrations
-- `make sqlc`: Regenerate sqlc code
-- `make test`: Run all tests
-
-For more detailed development guidelines, please refer to the internal
-development documentation.
+Trying claimctl with a real team? Please
+[open an issue](https://github.com/thetaqitahmid/claimctl/issues) describing
+what you share, how you coordinate access today, and what made adoption
+useful or difficult. Reports about installation friction and missing
+workflow support are especially valuable.
 
 ## License
 
-This project is licensed under the Apache 2.0 License - see the `LICENSE` file
-for details.
+claimctl is licensed under [Apache 2.0](LICENSE).

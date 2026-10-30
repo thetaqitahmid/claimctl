@@ -18,6 +18,7 @@ type MaintenanceChangeEvent struct {
 }
 
 type Event struct {
+	ID      int64       `json:"-"`
 	Type    string      `json:"type"`
 	Payload interface{} `json:"payload"`
 }

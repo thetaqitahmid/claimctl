@@ -15,6 +15,7 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"sync"
 	"text/template"
 	"time"
 	"unicode/utf8"
@@ -44,6 +45,8 @@ type WebhookService struct {
 	secretService *SecretService
 	httpClient    *http.Client
 	encryptionKey string
+	deliveryOnce  sync.Once
+	deliveryWG    sync.WaitGroup
 }
 
 func NewWebhookService(q db.Querier, secretService *SecretService, encryptionKey string) *WebhookService {
@@ -157,6 +160,9 @@ func (s *WebhookService) DeleteWebhook(ctx context.Context, id uuid.UUID) error 
 }
 
 func (s *WebhookService) AddResourceWebhook(ctx context.Context, resourceID, webhookID uuid.UUID, events []string) error {
+	if err := AuthorizeRequestResource(ctx, s.q, resourceID, true); err != nil {
+		return err
+	}
 	return s.q.AddResourceWebhook(ctx, db.AddResourceWebhookParams{
 		ResourceID: resourceID,
 		WebhookID:  webhookID,
@@ -165,6 +171,9 @@ func (s *WebhookService) AddResourceWebhook(ctx context.Context, resourceID, web
 }
 
 func (s *WebhookService) RemoveResourceWebhook(ctx context.Context, resourceID, webhookID uuid.UUID) error {
+	if err := AuthorizeRequestResource(ctx, s.q, resourceID, true); err != nil {
+		return err
+	}
 	return s.q.RemoveResourceWebhook(ctx, db.RemoveResourceWebhookParams{
 		ResourceID: resourceID,
 		WebhookID:  webhookID,
@@ -172,6 +181,9 @@ func (s *WebhookService) RemoveResourceWebhook(ctx context.Context, resourceID, 
 }
 
 func (s *WebhookService) GetResourceWebhooks(ctx context.Context, resourceID uuid.UUID) ([]db.GetResourceWebhooksRow, error) {
+	if err := AuthorizeRequestResource(ctx, s.q, resourceID, true); err != nil {
+		return nil, err
+	}
 	return s.q.GetResourceWebhooks(ctx, resourceID)
 }
 
@@ -200,47 +212,6 @@ type WebhookPayload struct {
 	Data        interface{}       `json:"data"`
 	Secrets     map[string]string `json:"-"`
 	Reservation interface{}       `json:"reservation,omitempty"`
-}
-
-func (s *WebhookService) TriggerWebhooks(ctx context.Context, resourceID uuid.UUID, event string, data interface{}) error {
-	webhooks, err := s.q.GetWebhooksForEvent(ctx, db.GetWebhooksForEventParams{
-		ResourceID: resourceID,
-		Column2:    event,
-	})
-	if err != nil {
-		return err
-	}
-
-	if len(webhooks) == 0 {
-		return nil
-	}
-
-	secretsList, err := s.secretService.ListSecrets(ctx)
-	if err != nil {
-		slog.Info("Failed to list secrets: ", "error", err)
-	}
-	secretsMap := make(map[string]string)
-	for _, secret := range secretsList {
-		secretsMap[secret.Key] = secret.Value
-	}
-
-	payloadInfo := WebhookPayload{
-		ResourceID: resourceID,
-		Event:      event,
-		Data:       data,
-		Secrets:    secretsMap,
-	}
-
-	if res, ok := data.(db.ClaimctlReservation); ok {
-		payloadInfo.Reservation = res
-	}
-
-	for i := range webhooks {
-		s.decryptWebhookSecret(&webhooks[i])
-		go s.executeWebhook(context.Background(), webhooks[i], payloadInfo)
-	}
-
-	return nil
 }
 
 func (s *WebhookService) executeWebhook(ctx context.Context, hook db.ClaimctlWebhook, payload WebhookPayload) {

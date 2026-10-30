@@ -68,7 +68,7 @@ func main() {
 	defer session.Close()
 
 	// Initialize services
-	queries := db.New(session)
+	queries := db.NewStore(session)
 	encryptionKey, err := utils.LoadOrGenerateKey("APP_ENCRYPTION_KEY", "./keys/app.key")
 	if err != nil {
 		slog.Error("Failed to initialize encryption key", "error", err)

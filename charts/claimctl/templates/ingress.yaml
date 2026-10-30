@@ -9,10 +9,9 @@ metadata:
     helm.sh/chart: {{ include "claimctl.chart" . }}
     app.kubernetes.io/instance: {{ .Release.Name }}
     app.kubernetes.io/managed-by: {{ .Release.Service }}
-  {{- with .Values.ingress.annotations }}
   annotations:
-    {{- toYaml . | nindent 4 }}
-  {{- end }}
+    {{- $annotations := mergeOverwrite (dict "nginx.ingress.kubernetes.io/proxy-buffering" "off" "nginx.ingress.kubernetes.io/proxy-read-timeout" "960") (.Values.ingress.annotations | default dict) }}
+    {{- toYaml $annotations | nindent 4 }}
 spec:
   {{- if .Values.ingress.className }}
   ingressClassName: {{ .Values.ingress.className }}

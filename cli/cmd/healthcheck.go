@@ -28,7 +28,7 @@ var healthConfigCmd = &cobra.Command{
 	RunE: func(cmd *cobra.Command, args []string) error {
 		resourceID := args[0]
 
-		client, err := api.NewClient(viper.GetString("url"), viper.GetString("token"), viper.GetBool("netrc"))
+		client, err := newClient(cmd)
 		if err != nil {
 			return fmt.Errorf("error creating client: %w", err)
 		}
@@ -68,7 +68,7 @@ var healthStatusCmd = &cobra.Command{
 	RunE: func(cmd *cobra.Command, args []string) error {
 		resourceID := args[0]
 
-		client, err := api.NewClient(viper.GetString("url"), viper.GetString("token"), viper.GetBool("netrc"))
+		client, err := newClient(cmd)
 		if err != nil {
 			return fmt.Errorf("error creating client: %w", err)
 		}
@@ -93,7 +93,7 @@ var healthHistoryCmd = &cobra.Command{
 
 		limit, _ := cmd.Flags().GetInt32("limit")
 
-		client, err := api.NewClient(viper.GetString("url"), viper.GetString("token"), viper.GetBool("netrc"))
+		client, err := newClient(cmd)
 		if err != nil {
 			return fmt.Errorf("error creating client: %w", err)
 		}
@@ -104,6 +104,9 @@ var healthHistoryCmd = &cobra.Command{
 		}
 
 		if len(history) == 0 {
+			if viper.GetBool("json") {
+				return outputJSON(cmd, []any{})
+			}
 			fmt.Println("No health check history found")
 			return nil
 		}
@@ -132,7 +135,7 @@ var healthTriggerCmd = &cobra.Command{
 	RunE: func(cmd *cobra.Command, args []string) error {
 		resourceID := args[0]
 
-		client, err := api.NewClient(viper.GetString("url"), viper.GetString("token"), viper.GetBool("netrc"))
+		client, err := newClient(cmd)
 		if err != nil {
 			return fmt.Errorf("error creating client: %w", err)
 		}
@@ -155,7 +158,7 @@ var healthGetCmd = &cobra.Command{
 	RunE: func(cmd *cobra.Command, args []string) error {
 		resourceID := args[0]
 
-		client, err := api.NewClient(viper.GetString("url"), viper.GetString("token"), viper.GetBool("netrc"))
+		client, err := newClient(cmd)
 		if err != nil {
 			return fmt.Errorf("error creating client: %w", err)
 		}
@@ -178,7 +181,7 @@ var healthDeleteCmd = &cobra.Command{
 	RunE: func(cmd *cobra.Command, args []string) error {
 		resourceID := args[0]
 
-		client, err := api.NewClient(viper.GetString("url"), viper.GetString("token"), viper.GetBool("netrc"))
+		client, err := newClient(cmd)
 		if err != nil {
 			return fmt.Errorf("error creating client: %w", err)
 		}

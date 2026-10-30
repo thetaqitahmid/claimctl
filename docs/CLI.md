@@ -4,6 +4,10 @@ The **claimctl CLI** (`claimctl`) is a command-line interface for managing
 resources, reservations, webhooks, and more in the claimctl system. It is
 designed for both interactive use and automation scripts.
 
+For secure transport, atomic claims, bundles, leases, metrics and managed
+`claimctl exec`, see [CLI lifecycle](cli-lifecycle.md). Its transport and
+lifecycle behavior supersedes the legacy reservation examples below.
+
 ## Installation
 
 ```bash

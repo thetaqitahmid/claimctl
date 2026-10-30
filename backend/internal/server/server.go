@@ -9,9 +9,9 @@ import (
 	"github.com/gofiber/contrib/otelfiber/v2"
 	"github.com/gofiber/fiber/v2"
 	"github.com/gofiber/fiber/v2/middleware/cors"
-	"github.com/gofiber/fiber/v2/middleware/csrf"
-	"github.com/gofiber/fiber/v2/middleware/limiter"
+
 	"github.com/thetaqitahmid/claimctl/internal/connection"
+	dbqueries "github.com/thetaqitahmid/claimctl/internal/db"
 	"github.com/thetaqitahmid/claimctl/internal/utils"
 )
 
@@ -27,7 +27,9 @@ func NewServer(ctx context.Context, db *connection.DBConn, privateKey *rsa.Priva
 		// 16KB buffer to accommodate large cookie payloads
 		// (access + refresh tokens in HTTP-only cookies)
 		ReadBufferSize: 16384,
+		ProxyHeader:    fiber.HeaderXForwardedFor,
 	})
+	app.Use(TrustedProxyMiddleware())
 	app.Use(otelfiber.Middleware())
 
 	// CORS Configuration
@@ -40,28 +42,11 @@ func NewServer(ctx context.Context, db *connection.DBConn, privateKey *rsa.Priva
 		app.Use(cors.New(cors.Config{
 			AllowCredentials: true,
 			AllowOrigins:     allowedOrigins,
+			AllowHeaders:     "Origin, Content-Type, Accept, Authorization, X-CSRF-Token",
 		}))
 	}
 
-	enableCSRF := utils.GetEnvAsBool("ENABLE_CSRF", true)
-	if enableCSRF {
-		app.Use(csrf.New(csrf.Config{
-			KeyLookup:      "cookie:csrf_",
-			CookieName:     "csrf_",
-			CookieSameSite: utils.GetEnv("COOKIE_SAMESITE", "Strict"),
-			CookieSecure:   utils.GetEnvAsBool("COOKIE_SECURE", true),
-			CookieHTTPOnly: true,
-			Expiration:     1 * time.Hour,
-			Next: func(c *fiber.Ctx) bool {
-				return c.Path() == "/api/auth/refresh"
-			},
-		}))
-	}
-
-	app.Use(limiter.New(limiter.Config{
-		Max:        60,
-		Expiration: 30 * time.Second,
-	}))
+	app.Use(AtomicRateLimiter(dbqueries.New(db), "global", 60, 30*time.Second))
 	app.Use(func(c *fiber.Ctx) error {
 		start := time.Now()
 		err := c.Next()

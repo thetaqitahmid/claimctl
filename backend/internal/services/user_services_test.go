@@ -2,6 +2,7 @@ package services
 
 import (
 	"database/sql"
+	"encoding/json"
 	"testing"
 	"time"
 
@@ -357,7 +358,10 @@ func TestUserService_CreateUser(t *testing.T) {
 				assert.NotNil(t, result)
 				assert.Equal(t, tt.createReq.Email, result.Email)
 				assert.Equal(t, tt.createReq.Name, result.Name)
-				assert.NotEqual(t, tt.createReq.Password, result.Password) // Password should be hashed
+				response, marshalErr := json.Marshal(result)
+				assert.NoError(t, marshalErr)
+				assert.NotContains(t, string(response), `"password"`)
+				assert.NotContains(t, string(response), tt.createReq.Password)
 			} else {
 				assert.Error(t, err)
 				if tt.expectedError != "" {
@@ -397,8 +401,9 @@ func TestUserService_UpdateUser(t *testing.T) {
 				Status: &[]string{"active"}[0],
 			},
 			mockSetup: func() {
-				mockDB.On("FindUserById", ctx, testutils.TestUUID(1)).Return(existingUser, nil)
+				mockDB.On("FindUserByIdForUpdate", ctx, testutils.TestUUID(1)).Return(existingUser, nil)
 				mockDB.On("UpdateUserById", ctx, mock.AnythingOfType("db.UpdateUserByIdParams")).Return(nil)
+				mockDB.On("RevokeAllUserRefreshTokens", ctx, testutils.TestUUID(1)).Return(nil)
 			},
 			shouldSucceed: true,
 		},
@@ -409,7 +414,7 @@ func TestUserService_UpdateUser(t *testing.T) {
 				Email: &[]string{"test@example.com"}[0],
 			},
 			mockSetup: func() {
-				mockDB.On("FindUserById", ctx, testutils.TestUUID(999)).Return(db.ClaimctlUser{}, assert.AnError)
+				mockDB.On("FindUserByIdForUpdate", ctx, testutils.TestUUID(999)).Return(db.ClaimctlUser{}, assert.AnError)
 			},
 			expectedError: "failed to retrieve user with ID 00000000-0000-0000-0000-0000000003e7",
 		},
@@ -420,7 +425,7 @@ func TestUserService_UpdateUser(t *testing.T) {
 				Role: &[]string{"invalid_role"}[0],
 			},
 			mockSetup: func() {
-				mockDB.On("FindUserById", ctx, testutils.TestUUID(1)).Return(existingUser, nil)
+				mockDB.On("FindUserByIdForUpdate", ctx, testutils.TestUUID(1)).Return(existingUser, nil)
 			},
 			expectedError: "invalid role",
 		},
@@ -431,7 +436,7 @@ func TestUserService_UpdateUser(t *testing.T) {
 				Password: &[]string{"weak"}[0],
 			},
 			mockSetup: func() {
-				mockDB.On("FindUserById", ctx, testutils.TestUUID(1)).Return(existingUser, nil)
+				mockDB.On("FindUserByIdForUpdate", ctx, testutils.TestUUID(1)).Return(existingUser, nil)
 			},
 			expectedError: "Password must be at least 8 characters long and contain uppercase, lowercase, and special character",
 		},
@@ -442,7 +447,7 @@ func TestUserService_UpdateUser(t *testing.T) {
 				Name: &[]string{"Updated Name"}[0],
 			},
 			mockSetup: func() {
-				mockDB.On("FindUserById", ctx, testutils.TestUUID(1)).Return(existingUser, nil)
+				mockDB.On("FindUserByIdForUpdate", ctx, testutils.TestUUID(1)).Return(existingUser, nil)
 				mockDB.On("UpdateUserById", ctx, mock.AnythingOfType("db.UpdateUserByIdParams")).Return(assert.AnError)
 			},
 			expectedError: "failed to update user",
@@ -471,6 +476,8 @@ func TestUserService_UpdateUser(t *testing.T) {
 }
 
 func TestUserService_EnsureAdminExists(t *testing.T) {
+	t.Setenv("ADMIN_PASSWORD", "BootstrapPass1!")
+	t.Setenv("ADMIN_EMAIL", "admin@claimctl.com")
 	ctx := testutils.TestContext()
 	mockDB := &testutils.MockQuerier{}
 	service := NewUserService(mockDB)
@@ -503,7 +510,7 @@ func TestUserService_EnsureAdminExists(t *testing.T) {
 				mockDB.On("CountAdminUsers", ctx).Return(int64(0), nil)
 				mockDB.On("VerifyUserEmailIsUnique", ctx, "admin@claimctl.com").Return(int64(1), nil)
 			},
-			shouldSucceed: true, // Should succeed because user already exists
+			expectedError: "bootstrap admin email is already in use",
 		},
 		{
 			name: "Database error counting admins",
@@ -554,7 +561,7 @@ func TestUserService_GetUser(t *testing.T) {
 	tests := []struct {
 		name          string
 		email         string
-		id uuid.UUID
+		id            uuid.UUID
 		mockSetup     func()
 		expectedError string
 		shouldSucceed bool
@@ -634,7 +641,7 @@ func TestUserService_DeleteUser(t *testing.T) {
 
 	tests := []struct {
 		name          string
-		userID uuid.UUID
+		userID        uuid.UUID
 		mockSetup     func()
 		expectedError string
 		shouldSucceed bool
@@ -766,11 +773,12 @@ func TestUserService_UpdatePassword(t *testing.T) {
 			newPassword:     "NewPass1!",
 			mockSetup: func() {
 				user := testutils.CreateTestUser(testutils.TestUUID(1), "test@example.com", "Test User", false)
-				mockDB.On("FindUserById", ctx, testutils.TestUUID(1)).Return(user, nil)
+				mockDB.On("FindUserByIdForUpdate", ctx, testutils.TestUUID(1)).Return(user, nil)
 				mockDB.On("GetPasswordById", ctx, testutils.TestUUID(1)).Return("$2a$10$O0ifkKjMGoT0hBq2kMUhAuwsBLfGd8/y3J6Q0yqylfs6bi8Zs8xZ6", nil)
 				mockDB.On("UpdateUserPassword", ctx, mock.MatchedBy(func(arg db.UpdateUserPasswordParams) bool {
 					return arg.ID == testutils.TestUUID(1)
 				})).Return(nil)
+				mockDB.On("RevokeAllUserRefreshTokens", ctx, testutils.TestUUID(1)).Return(nil)
 			},
 			shouldSucceed: true,
 		},
@@ -782,7 +790,7 @@ func TestUserService_UpdatePassword(t *testing.T) {
 			mockSetup: func() {
 				user := testutils.CreateTestUser(testutils.TestUUID(3), "oidc@example.com", "OIDC User", false)
 				user.AuthProvider = "oidc"
-				mockDB.On("FindUserById", ctx, testutils.TestUUID(3)).Return(user, nil)
+				mockDB.On("FindUserByIdForUpdate", ctx, testutils.TestUUID(3)).Return(user, nil)
 			},
 			expectedError: "password change is not available for oidc users",
 		},
@@ -792,7 +800,7 @@ func TestUserService_UpdatePassword(t *testing.T) {
 			currentPassword: "OldPass1!",
 			newPassword:     "NewPass1!",
 			mockSetup: func() {
-				mockDB.On("FindUserById", ctx, testutils.TestUUID(4)).Return(db.ClaimctlUser{}, assert.AnError)
+				mockDB.On("FindUserByIdForUpdate", ctx, testutils.TestUUID(4)).Return(db.ClaimctlUser{}, assert.AnError)
 			},
 			expectedError: "user not found",
 		},
@@ -803,7 +811,7 @@ func TestUserService_UpdatePassword(t *testing.T) {
 			newPassword:     "NewPass1!",
 			mockSetup: func() {
 				user := testutils.CreateTestUser(testutils.TestUUID(5), "test2@example.com", "Test User 2", false)
-				mockDB.On("FindUserById", ctx, testutils.TestUUID(5)).Return(user, nil)
+				mockDB.On("FindUserByIdForUpdate", ctx, testutils.TestUUID(5)).Return(user, nil)
 				mockDB.On("GetPasswordById", ctx, testutils.TestUUID(5)).Return("$2a$10$V0k3CYWOGRCJgIkaDCQW/.txz8VEmJKnYGp.JH0qjx7nM5qIqUeHS", nil)
 			},
 			expectedError: "incorrect current password",
@@ -815,7 +823,7 @@ func TestUserService_UpdatePassword(t *testing.T) {
 			newPassword:     "weak",
 			mockSetup: func() {
 				user := testutils.CreateTestUser(testutils.TestUUID(6), "test3@example.com", "Test User 3", false)
-				mockDB.On("FindUserById", ctx, testutils.TestUUID(6)).Return(user, nil)
+				mockDB.On("FindUserByIdForUpdate", ctx, testutils.TestUUID(6)).Return(user, nil)
 				mockDB.On("GetPasswordById", ctx, testutils.TestUUID(6)).Return("$2a$10$O0ifkKjMGoT0hBq2kMUhAuwsBLfGd8/y3J6Q0yqylfs6bi8Zs8xZ6", nil)
 			},
 			expectedError: "New password must be at least 8 characters",

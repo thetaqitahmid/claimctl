@@ -1,12 +1,15 @@
 package services
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log/slog"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 )
 
@@ -84,23 +87,21 @@ var tableQueries = []struct {
 
 // queryToRows runs a SELECT and returns the result as a slice of maps.
 func (s *BackupService) queryToRows(ctx context.Context, query string) ([]map[string]interface{}, error) {
-	rows, err := s.pool.Query(ctx, query)
+	rows, err := s.pool.Query(ctx, "SELECT row_to_json(backup_row) FROM ("+query+") AS backup_row")
 	if err != nil {
 		return nil, fmt.Errorf("query failed: %w", err)
 	}
 	defer rows.Close()
 
-	descs := rows.FieldDescriptions()
 	var result []map[string]interface{}
-
 	for rows.Next() {
-		values, err := rows.Values()
-		if err != nil {
+		var raw []byte
+		if err := rows.Scan(&raw); err != nil {
 			return nil, fmt.Errorf("scan failed: %w", err)
 		}
-		row := make(map[string]interface{}, len(descs))
-		for i, fd := range descs {
-			row[string(fd.Name)] = values[i]
+		var row map[string]interface{}
+		if err := json.Unmarshal(raw, &row); err != nil {
+			return nil, fmt.Errorf("invalid exported row: %w", err)
 		}
 		result = append(result, row)
 	}
@@ -128,8 +129,7 @@ func (s *BackupService) CreateBackup(ctx context.Context) (*BackupData, error) {
 	for _, tq := range tableQueries {
 		rows, err := s.queryToRows(ctx, tq.Query)
 		if err != nil {
-			slog.Warn("Backup: failed to export table, skipping", "table", tq.Name, "error", err)
-			rows = []map[string]interface{}{}
+			return nil, fmt.Errorf("failed to export %s: %w", tq.Name, err)
 		}
 		switch tq.Name {
 		case "spaces":
@@ -176,6 +176,11 @@ func (s *BackupService) CreateBackup(ctx context.Context) (*BackupData, error) {
 
 // truncation order: children first, then parents to respect FK constraints.
 var truncateOrder = []string{
+	"claimctl.realtime_events",
+	"claimctl.shared_storage",
+	"claimctl.rate_limits",
+	"claimctl.webhook_outbox",
+	"claimctl.worker_leases",
 	"claimctl.webhook_logs",
 	"claimctl.resource_webhooks",
 	"claimctl.resource_health_status",
@@ -198,20 +203,20 @@ var truncateOrder = []string{
 
 // TableSchemas defines the allowed columns for each table to prevent SQL injection via malicious JSON keys.
 var TableSchemas = map[string][]string{
-	"app_settings":                                 {"key", "value", "category", "description", "is_secret"},
+	"app_settings":                           {"key", "value", "category", "description", "is_secret", "updated_at"},
 	"claimctl.spaces":                        {"id", "name", "description", "created_at", "updated_at"},
-	"claimctl.users":                         {"id", "email", "name", "password", "role", "last_login", "status", "failed_login_attempts", "locked_until", "slack_destination", "teams_webhook_url", "created_at", "updated_at"},
+	"claimctl.users":                         {"id", "email", "name", "password", "role", "last_login", "status", "failed_login_attempts", "locked_until", "slack_destination", "teams_webhook_url", "notification_email", "auth_provider", "oidc_subject", "created_at", "updated_at"},
 	"claimctl.groups":                        {"id", "name", "description", "created_at", "updated_at"},
 	"claimctl.resources":                     {"id", "name", "type", "labels", "created_at", "updated_at", "space_id", "properties", "is_under_maintenance"},
 	"claimctl.secrets":                       {"id", "key", "value", "description", "created_at", "updated_at"},
 	"claimctl.webhooks":                      {"id", "name", "url", "method", "headers", "template", "description", "signing_secret", "created_at", "updated_at"},
-	"claimctl.reservations":                  {"id", "resource_id", "user_id", "status", "start_time", "end_time", "created_at", "updated_at", "queue_position", "duration", "scheduled_end_time"},
+	"claimctl.reservations":                  {"id", "resource_id", "user_id", "status", "start_time", "end_time", "created_at", "updated_at", "queue_position", "duration", "scheduled_end_time", "lease_duration", "lease_expires_at", "hard_end_time"},
 	"claimctl.reservation_history":           {"id", "resource_id", "reservation_id", "action", "user_id", "timestamp", "details"},
 	"claimctl.resource_webhooks":             {"resource_id", "webhook_id", "events"},
 	"claimctl.webhook_logs":                  {"id", "webhook_id", "event", "status_code", "request_body", "response_body", "duration_ms", "created_at"},
 	"claimctl.group_members":                 {"group_id", "user_id", "joined_at"},
 	"claimctl.space_permissions":             {"id", "space_id", "group_id", "user_id", "created_at"},
-	"claimctl.api_tokens":                    {"id", "user_id", "name", "token_hash", "last_used_at", "expires_at", "created_at"},
+	"claimctl.api_tokens":                    {"id", "user_id", "name", "token_hash", "last_used_at", "expires_at", "created_at", "scopes", "space_ids"},
 	"claimctl.resource_health_configs":       {"resource_id", "enabled", "check_type", "target", "interval_seconds", "timeout_seconds", "retry_count", "created_at", "updated_at"},
 	"claimctl.resource_health_status":        {"id", "resource_id", "status", "response_time_ms", "error_message", "checked_at", "created_at"},
 	"claimctl.user_notification_preferences": {"user_id", "event_type", "channel", "enabled", "created_at", "updated_at"},
@@ -221,12 +226,20 @@ var TableSchemas = map[string][]string{
 // RestoreBackup replaces all application data with the supplied backup.
 func (s *BackupService) RestoreBackup(ctx context.Context, data []byte) error {
 	var backup BackupData
-	if err := json.Unmarshal(data, &backup); err != nil {
+	decoder := json.NewDecoder(bytes.NewReader(data))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&backup); err != nil {
 		return fmt.Errorf("invalid backup JSON: %w", err)
 	}
+	if err := decoder.Decode(new(interface{})); err != io.EOF {
+		return fmt.Errorf("invalid backup JSON trailing data")
+	}
 
-	if backup.Metadata.Version == "" {
-		return fmt.Errorf("backup file missing metadata.version")
+	if backup.Metadata.Version != "1" {
+		return fmt.Errorf("unsupported backup version")
+	}
+	if err := validateBackupSecurity(&backup); err != nil {
+		return err
 	}
 
 	tx, err := s.pool.Begin(ctx)
@@ -234,6 +247,15 @@ func (s *BackupService) RestoreBackup(ctx context.Context, data []byte) error {
 		return fmt.Errorf("failed to start transaction: %w", err)
 	}
 	defer tx.Rollback(ctx)
+	if _, err := tx.Exec(ctx, "SET LOCAL lock_timeout = '5s'"); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(ctx, "SELECT pg_advisory_xact_lock(725025)"); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(ctx, "SET LOCAL claimctl.restoring = 'on'"); err != nil {
+		return fmt.Errorf("failed to suppress restore delivery: %w", err)
+	}
 
 	// 1. Truncate all tables
 	for _, table := range truncateOrder {
@@ -278,42 +300,56 @@ func (s *BackupService) RestoreBackup(ctx context.Context, data []byte) error {
 		slog.Info("Restore: inserted rows", "table", entry.Table, "count", len(entry.Rows))
 	}
 
-	// 3. Reset sequences for tables with SERIAL columns
-	sequences := []struct {
-		Sequence string
-		Table    string
-		Column   string
-	}{
-		{"claimctl.spaces_id_seq", "claimctl.spaces", "id"},
-		{"claimctl.users_id_seq", "claimctl.users", "id"},
-		{"claimctl.resources_id_seq", "claimctl.resources", "id"},
-		{"claimctl.reservations_id_seq", "claimctl.reservations", "id"},
-		{"claimctl.reservation_history_id_seq", "claimctl.reservation_history", "id"},
-		{"claimctl.webhooks_id_seq", "claimctl.webhooks", "id"},
-		{"claimctl.secrets_id_seq", "claimctl.secrets", "id"},
-		{"claimctl.webhook_logs_id_seq", "claimctl.webhook_logs", "id"},
-		{"claimctl.groups_id_seq", "claimctl.groups", "id"},
-		{"claimctl.space_permissions_id_seq", "claimctl.space_permissions", "id"},
-		{"claimctl.api_tokens_id_seq", "claimctl.api_tokens", "id"},
-		{"claimctl.resource_health_status_id_seq", "claimctl.resource_health_status", "id"},
-		{"claimctl.maintenance_audit_log_id_seq", "claimctl.maintenance_audit_log", "id"},
+	if _, err := tx.Exec(ctx, "INSERT INTO claimctl.realtime_events(event_type) VALUES ('resync')"); err != nil {
+		return err
 	}
-
-	for _, seq := range sequences {
-		query := fmt.Sprintf(
-			"SELECT setval('%s', COALESCE((SELECT MAX(%s) FROM %s), 0) + 1, false)",
-			seq.Sequence, seq.Column, seq.Table,
-		)
-		if _, err := tx.Exec(ctx, query); err != nil {
-			slog.Warn("Restore: failed to reset sequence", "sequence", seq.Sequence, "error", err)
-		}
-	}
-
 	if err := tx.Commit(ctx); err != nil {
 		return fmt.Errorf("failed to commit restore transaction: %w", err)
 	}
 
 	slog.Info("Restore: completed successfully")
+	return nil
+}
+
+func validateBackupSecurity(backup *BackupData) error {
+	for _, user := range backup.Users {
+		if provider, exists := user["auth_provider"]; exists && provider != "local" && provider != "oidc" {
+			return fmt.Errorf("invalid backup auth_provider")
+		}
+	}
+	for _, token := range backup.APITokens {
+		if raw, exists := token["scopes"]; exists {
+			scopes, ok := raw.([]interface{})
+			if !ok {
+				return fmt.Errorf("invalid backup token scopes")
+			}
+			for _, rawScope := range scopes {
+				scope, ok := rawScope.(string)
+				if !ok {
+					return fmt.Errorf("invalid backup token scope")
+				}
+				if _, known := TokenScopes[scope]; !known {
+					return fmt.Errorf("unknown backup token scope")
+				}
+			}
+		}
+		if raw, exists := token["space_ids"]; exists {
+			ids, ok := raw.([]interface{})
+			if !ok {
+				return fmt.Errorf("invalid backup token space_ids")
+			}
+			for _, rawID := range ids {
+				text, ok := rawID.(string)
+				if !ok {
+					return fmt.Errorf("invalid backup token space ID")
+				}
+				id, err := uuid.Parse(text)
+				if err != nil || id == uuid.Nil {
+					return fmt.Errorf("invalid backup token space ID")
+				}
+			}
+		}
+	}
 	return nil
 }
 
@@ -340,8 +376,20 @@ func insertRows(ctx context.Context, tx pgx.Tx, table string, rows []map[string]
 			}
 		}
 
+		for col := range row {
+			allowed := false
+			for _, known := range allowedColumns {
+				if col == known {
+					allowed = true
+					break
+				}
+			}
+			if !allowed {
+				return fmt.Errorf("unknown column %s in %s", col, table)
+			}
+		}
 		if len(rowColumns) == 0 {
-			continue
+			return fmt.Errorf("empty row in %s", table)
 		}
 
 		// Build INSERT statement for this row

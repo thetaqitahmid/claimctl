@@ -1,6 +1,7 @@
 -- name: CreateAPIToken :one
-INSERT INTO claimctl.api_tokens (user_id, name, token_hash, expires_at)
-VALUES ($1, $2, $3, $4)
+INSERT INTO claimctl.api_tokens
+    (user_id, name, token_hash, expires_at, scopes, space_ids)
+VALUES ($1, $2, $3, $4, $5, $6)
 RETURNING *;
 
 -- name: ListAPITokens :many

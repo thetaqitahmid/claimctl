@@ -9,7 +9,7 @@ import { useNotificationContext } from './useNotification';
 interface RealtimeEvent {
   type: string;
   payload: {
-    resource_id?: number;
+    resource_id?: string;
     resource_name?: string;
     action?: string;
   };
@@ -38,7 +38,16 @@ export const useRealtime = () => {
       withCredentials: true,
     });
 
+    let active = true;
+    const invalidate = () => {
+      if (!active) return;
+      dispatch(reservationsApiSlice.util.invalidateTags(['Reservation']));
+      dispatch(resourcesApiSlice.util.invalidateTags(['Resource']));
+    };
+    eventSource.onopen = invalidate;
+
     eventSource.onmessage = (event) => {
+      if (!active) return;
       try {
         const data: RealtimeEvent = JSON.parse(event.data);
         const { resource_name, action } = data.payload || {};
@@ -47,6 +56,7 @@ export const useRealtime = () => {
           case REALTIME_EVENTS.RESERVATION_UPDATE: {
             dispatch(reservationsApiSlice.util.invalidateTags(['Reservation']));
             dispatch(resourcesApiSlice.util.invalidateTags(['Resource']));
+            if (!action || !resource_name) break;
             const actionInfo = ACTION_LABELS[action || ''] || { label: action || 'updated', type: 'info' };
             const message = action === 'cancel_all'
               ? `${actionInfo.label} ${resource_name || 'resource'}`
@@ -57,7 +67,11 @@ export const useRealtime = () => {
           case REALTIME_EVENTS.QUEUE_UPDATE:
             dispatch(reservationsApiSlice.util.invalidateTags(['Reservation']));
             dispatch(resourcesApiSlice.util.invalidateTags(['Resource']));
-            showNotification('info', `Queue updated for ${resource_name || 'resource'}`);
+            if (resource_name) showNotification('info', `Queue updated for ${resource_name}`);
+            break;
+          case 'resync':
+          case 'maintenance_change':
+            invalidate();
             break;
           default:
             break;
@@ -68,12 +82,13 @@ export const useRealtime = () => {
     };
 
     eventSource.onerror = () => {
+      if (!active) return;
       console.error('SSE connection error');
-      // showNotification('error', 'Realtime connection lost');
-      eventSource.close();
+      invalidate();
     };
 
     return () => {
+      active = false;
       eventSource.close();
     };
   }, [dispatch, user, showNotification]);

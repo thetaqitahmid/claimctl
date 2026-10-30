@@ -12,19 +12,20 @@ import (
 
 	"github.com/thetaqitahmid/claimctl/internal/db"
 	"github.com/thetaqitahmid/claimctl/internal/types"
-	"github.com/thetaqitahmid/claimctl/internal/utils"
 )
 
 type QueueItem struct {
-	ID uuid.UUID   `json:"id"`
-	UserID uuid.UUID   `json:"userId"`
-	Status        string  `json:"status"`
-	QueuePosition int32   `json:"queuePosition"`
-	StartTime     int64   `json:"startTime"`
-	CreatedAt     int64   `json:"createdAt"`
-	UserName      string  `json:"userName"`
-	UserEmail     string  `json:"userEmail"`
-	Duration      *string `json:"duration,omitempty"`
+	ID             uuid.UUID          `json:"id"`
+	UserID         uuid.UUID          `json:"userId"`
+	Status         string             `json:"status"`
+	QueuePosition  int32              `json:"queuePosition"`
+	StartTime      int64              `json:"startTime"`
+	CreatedAt      int64              `json:"createdAt"`
+	UserName       string             `json:"userName"`
+	UserEmail      string             `json:"userEmail"`
+	Duration       *string            `json:"duration,omitempty"`
+	LeaseExpiresAt pgtype.Timestamptz `json:"leaseExpiresAt"`
+	HardEndTime    pgtype.Timestamptz `json:"hardEndTime"`
 }
 
 type ReservationService interface {
@@ -45,6 +46,7 @@ type ReservationService interface {
 }
 
 type reservationService struct {
+	policy          ReservationPolicy
 	store           db.Store
 	historySvc      ReservationHistoryService
 	webhookSvc      *WebhookService
@@ -53,7 +55,12 @@ type reservationService struct {
 }
 
 func NewReservationService(store db.Store, historySvc ReservationHistoryService, webhookSvc *WebhookService, realtimeSvc RealtimeService, notificationSvc NotificationService) ReservationService {
+	policy, err := LoadReservationPolicy()
+	if err != nil {
+		panic(err)
+	}
 	return &reservationService{
+		policy:          policy,
 		store:           store,
 		historySvc:      historySvc,
 		webhookSvc:      webhookSvc,
@@ -63,68 +70,26 @@ func NewReservationService(store db.Store, historySvc ReservationHistoryService,
 }
 
 func (s *reservationService) CreateReservation(ctx context.Context, userID uuid.UUID, resourceID uuid.UUID, duration *string) (*db.ClaimctlReservation, error) {
-	var reservation db.ClaimctlReservation
+	return s.Claim(ctx, userID, ClaimRequest{ResourceID: resourceID, Duration: duration}, "")
+}
 
-	err := s.store.ExecTx(ctx, func(q db.Querier) error {
-		// Acquire exclusive lock on the resource
-		_, err := q.AcquireResourceLock(ctx, resourceID)
-		if err != nil {
-			return fmt.Errorf("resource not found or failed to lock: %w", err)
-		}
-
-		// Check if resource is under maintenance
-		maintenanceStatus, err := q.GetResourceMaintenanceStatus(ctx, resourceID)
-		if err == nil && maintenanceStatus.Valid && maintenanceStatus.Bool {
-			return fmt.Errorf("resource is currently under maintenance and cannot be reserved")
-		}
-
-		// Check if user already has an active/pending reservation for this resource
-		existingReservation, err := q.FindUserReservationForResource(ctx, db.FindUserReservationForResourceParams{
-			UserID:     userID,
-			ResourceID: resourceID,
-		})
-		if err == nil {
-			return fmt.Errorf("user already has a reservation for this resource (status: %s)", existingReservation.Status.String)
-		}
-
-		// Create the reservation with proper status and queue position
-		var durationInterval pgtype.Interval
-		if duration != nil {
-			d, parseErr := utils.ParseDurationWithDays(*duration)
-			if parseErr == nil {
-				durationInterval = pgtype.Interval{Microseconds: int64(d.Microseconds()), Valid: true}
-				slog.Info("Parsed duration", "duration", *duration, "microseconds", durationInterval.Microseconds)
-			} else {
-				slog.Error("Failed to parse duration", "duration", *duration, "error", parseErr)
-			}
-		} else {
-			slog.Info("CreateReservation called with nil duration")
-		}
-
-		createdRes, createErr := q.CreateReservation(ctx, db.CreateReservationParams{
-			ResourceID: resourceID,
-			UserID:     userID,
-			Duration:   durationInterval,
-		})
-		if createErr != nil {
-			return fmt.Errorf("failed to create reservation: %w", createErr)
-		}
-		reservation = createdRes
-		return nil
-	})
-
-	if err != nil {
-		return nil, err
+func (s *reservationService) notify(ctx context.Context, userID uuid.UUID, event string, payload NotificationPayload) {
+	if s.notificationSvc == nil {
+		return
 	}
+	notifyCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	if err := s.notificationSvc.Notify(notifyCtx, userID, event, payload); err != nil {
+		slog.Warn("Reservation notification failed", "event", event)
+	}
+}
 
-	// Trigger Webhook
-	_ = s.webhookSvc.TriggerWebhooks(ctx, resourceID, "reservation.created", reservation)
+func (s *reservationService) publishCreated(ctx context.Context, reservation db.ClaimctlReservation) {
+	resourceID, userID := reservation.ResourceID, reservation.UserID
 
 	// Send Notification
-	// Detach from the request context: the handler returns before this
-	// goroutine finishes its DB reads, and Fiber recycles request contexts.
 	resource, _ := s.store.FindResourceById(ctx, resourceID)
-	go s.notificationSvc.Notify(context.WithoutCancel(ctx), userID, "reservation_created", NotificationPayload{
+	s.notify(ctx, userID, "reservation_created", NotificationPayload{
 		Subject: "Reservation Created",
 		Message: fmt.Sprintf("Your reservation for resource '%s' has been created.", resource.Name),
 	})
@@ -138,15 +103,13 @@ func (s *reservationService) CreateReservation(ctx context.Context, userID uuid.
 		},
 	})
 
-	return &reservation, nil
 }
 
 func (s *reservationService) CancelAllForResource(ctx context.Context, resourceID uuid.UUID) error {
-	timestamp := time.Now().Unix()
-	err := s.store.CancelAllReservationsForResource(ctx, db.CancelAllReservationsForResourceParams{
-		ResourceID: resourceID,
-		EndTime:    pgtype.Int8{Int64: timestamp, Valid: true},
-	})
+	if err := AuthorizeRequestResource(ctx, s.store, resourceID, true); err != nil {
+		return err
+	}
+	err := s.store.CancelAllReservationsForResource(ctx, resourceID)
 	if err != nil {
 		return fmt.Errorf("failed to cancel all reservations: %w", err)
 	}
@@ -183,6 +146,14 @@ func (s *reservationService) activateReservationInternal(ctx context.Context, re
 			return fmt.Errorf("resource not found or failed to lock: %w", err)
 		}
 
+		res, err = q.FindReservationById(ctx, reservationID)
+		if err != nil {
+			return err
+		}
+		if res.LeaseExpiresAt.Valid && !res.LeaseExpiresAt.Time.After(time.Now()) || res.HardEndTime.Valid && !res.HardEndTime.Time.After(time.Now()) {
+			return ErrClaimConflict
+		}
+
 		slog.Info("[ACTIVATE] Found reservation", "reservation_id", reservationID, "status", res.Status.String, "resource_id", res.ResourceID, "user_id", res.UserID, "queue_position", res.QueuePosition.Int32)
 
 		if res.Status.String != "pending" {
@@ -201,20 +172,19 @@ func (s *reservationService) activateReservationInternal(ctx context.Context, re
 
 		slog.Info("[ACTIVATE] Promoting queue positions", "resource_id", res.ResourceID, "position", res.QueuePosition.Int32)
 		// Update queue positions for all reservations that were behind the given position internally within the transaction
-		timestamp := time.Now().Unix()
-		q.UpdateQueuePositions(ctx, db.UpdateQueuePositionsParams{
+		if err = q.UpdateQueuePositions(ctx, db.UpdateQueuePositionsParams{
 			ResourceID:    res.ResourceID,
-			UpdatedAt:     pgtype.Int8{Int64: timestamp, Valid: true},
 			QueuePosition: pgtype.Int4{Int32: res.QueuePosition.Int32, Valid: true},
-		})
+		}); err != nil {
+			return err
+		}
 
 		slog.Info("[ACTIVATE] Executing ActivateReservation SQL", "reservation_id", reservationID)
-		err = q.ActivateReservation(ctx, db.ActivateReservationParams{
-			ID:          reservationID,
-			StartTime:   pgtype.Int8{Int64: timestamp, Valid: true},
-			ToTimestamp: float64(timestamp),
-			UpdatedAt:   pgtype.Int8{Int64: timestamp, Valid: true},
-		})
+		activated, activationErr := q.ActivateReservation(ctx, reservationID)
+		err = activationErr
+		if err == nil && activated != 1 {
+			return ErrClaimConflict
+		}
 		if err != nil {
 			slog.Error("[ACTIVATE] ActivateReservation SQL failed", "reservation_id", reservationID, "error", err)
 			return fmt.Errorf("failed to activate reservation: %w", err)
@@ -230,12 +200,9 @@ func (s *reservationService) activateReservationInternal(ctx context.Context, re
 
 	slog.Info("[ACTIVATE] Reservation activated successfully", "reservation_id", reservationID)
 
-	// Trigger Webhook
-	_ = s.webhookSvc.TriggerWebhooks(ctx, reservation.ResourceID, "reservation.activated", reservation)
-
 	// Send Notification
 	activatedResource, _ := s.store.FindResourceById(ctx, reservation.ResourceID)
-	go s.notificationSvc.Notify(context.WithoutCancel(ctx), reservation.UserID, "reservation_activated", NotificationPayload{
+	s.notify(ctx, reservation.UserID, "reservation_activated", NotificationPayload{
 		Subject: "Reservation Activated",
 		Message: fmt.Sprintf("Your reservation for resource '%s' is now active.", activatedResource.Name),
 	})
@@ -254,6 +221,9 @@ func (s *reservationService) activateReservationInternal(ctx context.Context, re
 }
 
 func (s *reservationService) ActivateReservation(ctx context.Context, reservationID uuid.UUID) (*db.ClaimctlReservation, error) {
+	if err := AuthorizeRequestReservation(ctx, s.store, reservationID, true); err != nil {
+		return nil, err
+	}
 	err := s.activateReservationInternal(ctx, reservationID)
 	if err != nil {
 		return nil, err
@@ -269,6 +239,9 @@ func (s *reservationService) ActivateReservation(ctx context.Context, reservatio
 }
 
 func (s *reservationService) CompleteReservation(ctx context.Context, reservationID uuid.UUID) error {
+	if err := AuthorizeRequestReservation(ctx, s.store, reservationID, false); err != nil {
+		return err
+	}
 	var reservation db.ClaimctlReservation
 
 	err := s.store.ExecTx(ctx, func(q db.Querier) error {
@@ -288,12 +261,7 @@ func (s *reservationService) CompleteReservation(ctx context.Context, reservatio
 		}
 
 		// Complete the reservation
-		timestamp := time.Now().Unix()
-		err = q.CompleteReservation(ctx, db.CompleteReservationParams{
-			ID:        reservationID,
-			EndTime:   pgtype.Int8{Int64: timestamp, Valid: true},
-			UpdatedAt: pgtype.Int8{Int64: timestamp, Valid: true},
-		})
+		err = q.CompleteReservation(ctx, reservationID)
 		if err != nil {
 			return fmt.Errorf("failed to complete reservation: %w", err)
 		}
@@ -306,12 +274,9 @@ func (s *reservationService) CompleteReservation(ctx context.Context, reservatio
 		return err
 	}
 
-	// Trigger Webhook
-	_ = s.webhookSvc.TriggerWebhooks(ctx, reservation.ResourceID, "reservation.completed", reservation)
-
 	// Send Notification
 	completedResource, _ := s.store.FindResourceById(ctx, reservation.ResourceID)
-	go s.notificationSvc.Notify(context.WithoutCancel(ctx), reservation.UserID, "reservation_completed", NotificationPayload{
+	s.notify(ctx, reservation.UserID, "reservation_completed", NotificationPayload{
 		Subject: "Reservation Completed",
 		Message: fmt.Sprintf("Your reservation for resource '%s' has been completed.", completedResource.Name),
 	})
@@ -319,7 +284,7 @@ func (s *reservationService) CompleteReservation(ctx context.Context, reservatio
 	slog.Info("[RESERVATION] Completed reservation", "reservation_id: ", reservationID, "resource_id: ", reservation.ResourceID, "user_id: ", reservation.UserID)
 
 	// Process the queue after completion to activate the next reservation
-	s.ProcessQueue(ctx, reservation.ResourceID)
+	s.processQueueInternal(ctx, reservation.ResourceID)
 
 	// Broadcast Realtime Event
 	s.realtimeSvc.Broadcast(types.Event{
@@ -335,6 +300,9 @@ func (s *reservationService) CompleteReservation(ctx context.Context, reservatio
 }
 
 func (s *reservationService) CancelReservation(ctx context.Context, reservationID uuid.UUID, userID uuid.UUID) error {
+	if err := AuthorizeRequestReservation(ctx, s.store, reservationID, false); err != nil {
+		return err
+	}
 	var reservation db.ClaimctlReservation
 
 	err := s.store.ExecTx(ctx, func(q db.Querier) error {
@@ -359,12 +327,7 @@ func (s *reservationService) CancelReservation(ctx context.Context, reservationI
 		}
 
 		// Cancel the reservation
-		timestamp := time.Now().Unix()
-		err = q.CancelReservation(ctx, db.CancelReservationParams{
-			ID:        reservationID,
-			EndTime:   pgtype.Int8{Int64: timestamp, Valid: true},
-			UpdatedAt: pgtype.Int8{Int64: timestamp, Valid: true},
-		})
+		err = q.CancelReservation(ctx, reservationID)
 		if err != nil {
 			return fmt.Errorf("failed to cancel reservation: %w", err)
 		}
@@ -377,12 +340,9 @@ func (s *reservationService) CancelReservation(ctx context.Context, reservationI
 		return err
 	}
 
-	// Trigger Webhook
-	_ = s.webhookSvc.TriggerWebhooks(ctx, reservation.ResourceID, "reservation.cancelled", reservation)
-
 	// Send Notification
 	cancelledRes, _ := s.store.FindResourceById(ctx, reservation.ResourceID)
-	go s.notificationSvc.Notify(context.WithoutCancel(ctx), reservation.UserID, "reservation_cancelled", NotificationPayload{
+	s.notify(ctx, reservation.UserID, "reservation_cancelled", NotificationPayload{
 		Subject: "Reservation Cancelled",
 		Message: fmt.Sprintf("Your reservation for resource '%s' has been cancelled.", cancelledRes.Name),
 	})
@@ -391,7 +351,7 @@ func (s *reservationService) CancelReservation(ctx context.Context, reservationI
 
 	// If this was an active reservation, process the queue to activate the next one
 	if reservation.Status.String == "active" {
-		s.ProcessQueue(ctx, reservation.ResourceID)
+		s.processQueueInternal(ctx, reservation.ResourceID)
 	} else {
 		// If this was a pending reservation, promote others in the queue
 		s.PromoteQueuePositions(ctx, reservation.ResourceID, reservation.QueuePosition.Int32)
@@ -411,6 +371,9 @@ func (s *reservationService) CancelReservation(ctx context.Context, reservationI
 }
 
 func (s *reservationService) GetReservation(ctx context.Context, reservationID uuid.UUID) (*db.ClaimctlReservation, error) {
+	if err := AuthorizeRequestReservation(ctx, s.store, reservationID, false); err != nil {
+		return nil, err
+	}
 	reservation, err := s.store.FindReservationById(ctx, reservationID)
 	if err != nil {
 		return nil, fmt.Errorf("reservation not found: %w", err)
@@ -423,10 +386,25 @@ func (s *reservationService) GetUserReservations(ctx context.Context, userID uui
 	if err != nil {
 		return nil, fmt.Errorf("failed to get user reservations: %w", err)
 	}
+	if auth, ok := AuthorizationFromContext(ctx); ok {
+		if userID != auth.User.ID {
+			return nil, ErrAccessDenied
+		}
+		visible := make([]db.FindUserActiveReservationsRow, 0, len(reservations))
+		for _, row := range reservations {
+			if AuthorizeRequestResource(ctx, s.store, row.ResourceID, false) == nil {
+				visible = append(visible, row)
+			}
+		}
+		reservations = visible
+	}
 	return reservations, nil
 }
 
 func (s *reservationService) GetResourceReservations(ctx context.Context, resourceID uuid.UUID) ([]db.FindReservationsByResourceRow, error) {
+	if err := AuthorizeRequestResource(ctx, s.store, resourceID, false); err != nil {
+		return nil, err
+	}
 	reservations, err := s.store.FindReservationsByResource(ctx, resourceID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get resource reservations: %w", err)
@@ -443,6 +421,9 @@ func (s *reservationService) GetAllReservations(ctx context.Context) ([]db.FindA
 }
 
 func (s *reservationService) GetNextInQueue(ctx context.Context, resourceID uuid.UUID) (*db.ClaimctlReservation, error) {
+	if err := AuthorizeRequestResource(ctx, s.store, resourceID, false); err != nil {
+		return nil, err
+	}
 	reservation, err := s.store.GetNextInQueue(ctx, resourceID)
 	if err != nil {
 		return nil, fmt.Errorf("no reservations in queue: %w", err)
@@ -451,6 +432,9 @@ func (s *reservationService) GetNextInQueue(ctx context.Context, resourceID uuid
 }
 
 func (s *reservationService) GetUserQueuePosition(ctx context.Context, userID uuid.UUID, resourceID uuid.UUID) (int64, error) {
+	if err := AuthorizeRequestResource(ctx, s.store, resourceID, false); err != nil {
+		return 0, err
+	}
 	position, err := s.store.GetUserQueuePosition(ctx, db.GetUserQueuePositionParams{
 		UserID:     userID,
 		ResourceID: resourceID,
@@ -462,12 +446,19 @@ func (s *reservationService) GetUserQueuePosition(ctx context.Context, userID uu
 }
 
 func (s *reservationService) ProcessQueue(ctx context.Context, resourceID uuid.UUID) error {
+	if err := AuthorizeRequestResource(ctx, s.store, resourceID, true); err != nil {
+		return err
+	}
+	return s.processQueueInternal(ctx, resourceID)
+}
+
+func (s *reservationService) processQueueInternal(ctx context.Context, resourceID uuid.UUID) error {
 	nextReservation, err := s.store.GetNextInQueue(ctx, resourceID)
 	if err != nil {
 		return nil
 	}
 
-	_, err = s.ActivateReservation(ctx, nextReservation.ID)
+	err = s.activateReservationInternal(ctx, nextReservation.ID)
 
 	if err == nil {
 		// Broadcast Queue Update
@@ -485,16 +476,17 @@ func (s *reservationService) ProcessQueue(ctx context.Context, resourceID uuid.U
 }
 
 func (s *reservationService) PromoteQueuePositions(ctx context.Context, resourceID uuid.UUID, position int32) {
-	timestamp := time.Now().Unix()
 	// Update queue positions for all reservations that were behind the given position
 	s.store.UpdateQueuePositions(ctx, db.UpdateQueuePositionsParams{
 		ResourceID:    resourceID,
-		UpdatedAt:     pgtype.Int8{Int64: timestamp, Valid: true},
 		QueuePosition: pgtype.Int4{Int32: position, Valid: true},
 	})
 }
 
 func (s *reservationService) GetQueueForResource(ctx context.Context, resourceID uuid.UUID) ([]QueueItem, error) {
+	if err := AuthorizeRequestResource(ctx, s.store, resourceID, false); err != nil {
+		return nil, err
+	}
 	rows, err := s.store.GetQueueForResource(ctx, resourceID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get queue for resource: %w", err)
@@ -529,15 +521,17 @@ func (s *reservationService) GetQueueForResource(ctx context.Context, resourceID
 		}
 
 		queue[i] = QueueItem{
-			ID:            row.ID,
-			UserID:        row.UserID,
-			Status:        row.Status.String,
-			QueuePosition: queuePosition,
-			StartTime:     startTime,
-			CreatedAt:     createdAt,
-			UserName:      row.UserName,
-			UserEmail:     row.UserEmail,
-			Duration:      duration,
+			ID:             row.ID,
+			UserID:         row.UserID,
+			Status:         row.Status.String,
+			QueuePosition:  queuePosition,
+			StartTime:      startTime,
+			CreatedAt:      createdAt,
+			UserName:       row.UserName,
+			UserEmail:      row.UserEmail,
+			Duration:       duration,
+			LeaseExpiresAt: row.LeaseExpiresAt,
+			HardEndTime:    row.HardEndTime,
 		}
 	}
 
@@ -545,49 +539,54 @@ func (s *reservationService) GetQueueForResource(ctx context.Context, resourceID
 }
 
 func (s *reservationService) ExpireReservations(ctx context.Context) error {
-	timestamp := time.Now().Unix()
-
-	// Find expired reservations
 	expired, err := s.store.FindExpiredActiveReservations(ctx)
 	if err != nil {
-		return fmt.Errorf("failed to find expired reservations: %w", err)
+		return err
 	}
-
 	for _, res := range expired {
-		err := s.store.ExpireReservation(ctx, db.ExpireReservationParams{
-			ID:        res.ID,
-			UpdatedAt: pgtype.Int8{Int64: timestamp, Valid: true},
+		var reclaimed []db.ClaimctlReservation
+		var promoted *db.ClaimctlReservation
+		err = s.store.ExecTx(ctx, func(q db.Querier) error {
+			locked, e := q.TryWorkerTransactionLock(ctx, "expiry:"+res.ResourceID.String())
+			if e != nil || !locked {
+				return e
+			}
+			if _, e := q.AcquireResourceLock(ctx, res.ResourceID); e != nil {
+				return e
+			}
+			reclaimed, e = q.ReclaimResourceReservations(ctx, res.ResourceID)
+			if e != nil || len(reclaimed) == 0 {
+				return e
+			}
+			prior, priorErr := q.FindActiveReservationByResource(ctx, res.ResourceID)
+			if e = promoteLiveQueue(ctx, q, res.ResourceID); e != nil {
+				return e
+			}
+			after, afterErr := q.FindActiveReservationByResource(ctx, res.ResourceID)
+			if afterErr == nil && (priorErr != nil || prior.ID != after.ID) {
+				promoted = &after
+			}
+			return nil
 		})
 		if err != nil {
-			slog.Info("Failed to expire reservation", "reservation_id: ", res.ID, "error: ", err)
-			continue
+			return err
 		}
-
-		// Trigger Webhook
-		_ = s.webhookSvc.TriggerWebhooks(ctx, res.ResourceID, "reservation.expired", res)
-
-		// Send Notification
-		expiredResource, _ := s.store.FindResourceById(ctx, res.ResourceID)
-		go s.notificationSvc.Notify(context.WithoutCancel(ctx), res.UserID, "reservation_expired", NotificationPayload{
-			Subject: "Reservation Expired",
-			Message: fmt.Sprintf("Your reservation for resource '%s' has expired.", expiredResource.Name),
-		})
-
-		slog.Info("[RESERVATION] Expired reservation", "reservation_id: ", res.ID, "resource_id: ", res.ResourceID, "user_id: ", res.UserID)
-
-		// Process queue
-		s.ProcessQueue(ctx, res.ResourceID)
-
-		// Broadcast Realtime Event
-		s.realtimeSvc.Broadcast(types.Event{
-			Type: types.EventReservationUpdate,
-			Payload: map[string]interface{}{
-				"resource_id":   res.ResourceID,
-				"resource_name": expiredResource.Name,
-				"action":        "expired",
-			},
-		})
+		if promoted != nil {
+			if s.notificationSvc != nil {
+				s.notify(ctx, promoted.UserID, "reservation_activated", NotificationPayload{Subject: "Reservation Activated", Message: "Your reservation is now active."})
+			}
+			if s.realtimeSvc != nil {
+				s.realtimeSvc.Broadcast(types.Event{Type: types.EventQueueUpdate, Payload: map[string]interface{}{"resource_id": promoted.ResourceID}})
+			}
+		}
+		for _, r := range reclaimed {
+			if s.notificationSvc != nil {
+				s.notify(ctx, r.UserID, "reservation_expired", NotificationPayload{Subject: "Reservation Expired", Message: "Your reservation has expired."})
+			}
+			if s.realtimeSvc != nil {
+				s.realtimeSvc.Broadcast(types.Event{Type: types.EventReservationUpdate, Payload: map[string]interface{}{"resource_id": r.ResourceID, "action": "expired"}})
+			}
+		}
 	}
-
 	return nil
 }

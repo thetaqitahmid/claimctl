@@ -25,7 +25,8 @@ func (h *APITokenHandler) GenerateToken(c *fiber.Ctx) error {
 
 	var req struct {
 		Name      string `json:"name"`
-		ExpiresIn string `json:"expires_in"` // optional, e.g., "30d", "1y"
+		ExpiresIn string `json:"expires_in"`
+		services.TokenOptions
 	}
 
 	if err := c.BodyParser(&req); err != nil {
@@ -38,17 +39,17 @@ func (h *APITokenHandler) GenerateToken(c *fiber.Ctx) error {
 
 	var expiresAt *time.Time
 	if req.ExpiresIn != "" {
-		duration, err := time.ParseDuration(req.ExpiresIn)
-		if err == nil {
-			exp := time.Now().Add(duration)
-			expiresAt = &exp
+		duration, err := utils.ParseDurationWithDays(req.ExpiresIn)
+		if err != nil {
+			return utils.SendError(c, fiber.StatusBadRequest, "Invalid expires_in", err)
 		}
-		// If parsing fails or not provided, we can default to nil (never expires) or handle error
+		exp := time.Now().Add(duration)
+		expiresAt = &exp
 	}
 
-	tokenString, tokenRecord, err := h.service.GenerateToken(c.Context(), userID, req.Name, expiresAt)
+	tokenString, tokenRecord, err := h.service.GenerateToken(c.Context(), userID, req.Name, expiresAt, req.TokenOptions)
 	if err != nil {
-		return utils.SendError(c, fiber.StatusInternalServerError, "Failed to generate token", err)
+		return utils.SendError(c, fiber.StatusBadRequest, "Failed to generate token", err)
 	}
 
 	return c.Status(fiber.StatusCreated).JSON(fiber.Map{
@@ -57,6 +58,8 @@ func (h *APITokenHandler) GenerateToken(c *fiber.Ctx) error {
 		"name":      tokenRecord.Name,
 		"createdAt": tokenRecord.CreatedAt,
 		"expiresAt": tokenRecord.ExpiresAt,
+		"scopes":    tokenRecord.Scopes,
+		"spaceIds":  tokenRecord.SpaceIds,
 	})
 }
 

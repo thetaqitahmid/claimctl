@@ -1,6 +1,9 @@
 package cmd
 
 import (
+	"claimctl-cli/pkg/api"
+	"context"
+	"errors"
 	"fmt"
 	"os"
 	"strings"
@@ -71,8 +74,28 @@ func GetExitCode(err error) int {
 	}
 
 	// Check if it's already a CLIError
-	if cliErr, ok := err.(*CLIError); ok {
+	var cliErr *CLIError
+	if errors.As(err, &cliErr) {
 		return cliErr.ExitCode
+	}
+	if errors.Is(err, context.DeadlineExceeded) {
+		return ExitTimeout
+	}
+	if errors.Is(err, context.Canceled) {
+		return ExitCancelled
+	}
+	var apiErr *api.APIError
+	if errors.As(err, &apiErr) {
+		switch apiErr.StatusCode {
+		case 401, 403:
+			return ExitUnauthorized
+		case 404:
+			return ExitNotFound
+		case 409:
+			return ExitResourceBusy
+		default:
+			return ExitError
+		}
 	}
 
 	errStr := strings.ToLower(err.Error())

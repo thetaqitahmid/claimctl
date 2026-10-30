@@ -12,81 +12,58 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
-const activateReservation = `-- name: ActivateReservation :exec
+const activateReservation = `-- name: ActivateReservation :execrows
 UPDATE claimctl.reservations
 SET
     status='active',
-    start_time=$2,
-    scheduled_end_time = CASE WHEN duration IS NOT NULL THEN (to_timestamp($3) + duration) ELSE NULL END,
+    start_time=FLOOR(EXTRACT(EPOCH FROM statement_timestamp()))::BIGINT,
+    scheduled_end_time = LEAST(CASE WHEN duration IS NOT NULL THEN (statement_timestamp() + duration) ELSE NULL END, hard_end_time),
     queue_position=0,
-    updated_at=$4
-WHERE id=$1 AND status='pending'
+    updated_at=FLOOR(EXTRACT(EPOCH FROM statement_timestamp()))::BIGINT
+WHERE claimctl.reservations.id=$1 AND claimctl.reservations.status='pending'
+    AND (lease_expires_at IS NULL OR lease_expires_at > statement_timestamp())
+    AND (hard_end_time IS NULL OR hard_end_time > statement_timestamp())
+    AND NOT EXISTS (SELECT 1 FROM claimctl.reservations active WHERE active.resource_id=claimctl.reservations.resource_id AND active.status='active')
 `
 
-type ActivateReservationParams struct {
-	ID          uuid.UUID   `json:"id"`
-	StartTime   pgtype.Int8 `json:"startTime"`
-	ToTimestamp float64     `json:"toTimestamp"`
-	UpdatedAt   pgtype.Int8 `json:"updatedAt"`
-}
-
-func (q *Queries) ActivateReservation(ctx context.Context, arg ActivateReservationParams) error {
-	_, err := q.db.Exec(ctx, activateReservation,
-		arg.ID,
-		arg.StartTime,
-		arg.ToTimestamp,
-		arg.UpdatedAt,
-	)
-	return err
+func (q *Queries) ActivateReservation(ctx context.Context, id uuid.UUID) (int64, error) {
+	result, err := q.db.Exec(ctx, activateReservation, id)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
 
 const cancelAllReservationsForResource = `-- name: CancelAllReservationsForResource :exec
 UPDATE claimctl.reservations
-SET status='cancelled', end_time=$2, queue_position=NULL, updated_at=$2
+SET status='cancelled', end_time=GREATEST(start_time, FLOOR(EXTRACT(EPOCH FROM statement_timestamp()))::BIGINT), queue_position=NULL, updated_at=FLOOR(EXTRACT(EPOCH FROM statement_timestamp()))::BIGINT
 WHERE resource_id=$1 AND status IN ('pending', 'active')
 `
 
-type CancelAllReservationsForResourceParams struct {
-	ResourceID uuid.UUID   `json:"resourceId"`
-	EndTime    pgtype.Int8 `json:"endTime"`
-}
-
-func (q *Queries) CancelAllReservationsForResource(ctx context.Context, arg CancelAllReservationsForResourceParams) error {
-	_, err := q.db.Exec(ctx, cancelAllReservationsForResource, arg.ResourceID, arg.EndTime)
+func (q *Queries) CancelAllReservationsForResource(ctx context.Context, resourceID uuid.UUID) error {
+	_, err := q.db.Exec(ctx, cancelAllReservationsForResource, resourceID)
 	return err
 }
 
 const cancelReservation = `-- name: CancelReservation :exec
 UPDATE claimctl.reservations
-SET status='cancelled', end_time=$2, queue_position=NULL, updated_at=$3
+SET status='cancelled', end_time=GREATEST(start_time, FLOOR(EXTRACT(EPOCH FROM statement_timestamp()))::BIGINT), queue_position=NULL, updated_at=FLOOR(EXTRACT(EPOCH FROM statement_timestamp()))::BIGINT
 WHERE id=$1 AND status IN ('pending', 'active')
 `
 
-type CancelReservationParams struct {
-	ID        uuid.UUID   `json:"id"`
-	EndTime   pgtype.Int8 `json:"endTime"`
-	UpdatedAt pgtype.Int8 `json:"updatedAt"`
-}
-
-func (q *Queries) CancelReservation(ctx context.Context, arg CancelReservationParams) error {
-	_, err := q.db.Exec(ctx, cancelReservation, arg.ID, arg.EndTime, arg.UpdatedAt)
+func (q *Queries) CancelReservation(ctx context.Context, id uuid.UUID) error {
+	_, err := q.db.Exec(ctx, cancelReservation, id)
 	return err
 }
 
 const completeReservation = `-- name: CompleteReservation :exec
 UPDATE claimctl.reservations
-SET status='completed', end_time=$2, updated_at=$3
+SET status='completed', end_time=GREATEST(start_time, FLOOR(EXTRACT(EPOCH FROM statement_timestamp()))::BIGINT), updated_at=FLOOR(EXTRACT(EPOCH FROM statement_timestamp()))::BIGINT
 WHERE id=$1 AND status='active'
 `
 
-type CompleteReservationParams struct {
-	ID        uuid.UUID   `json:"id"`
-	EndTime   pgtype.Int8 `json:"endTime"`
-	UpdatedAt pgtype.Int8 `json:"updatedAt"`
-}
-
-func (q *Queries) CompleteReservation(ctx context.Context, arg CompleteReservationParams) error {
-	_, err := q.db.Exec(ctx, completeReservation, arg.ID, arg.EndTime, arg.UpdatedAt)
+func (q *Queries) CompleteReservation(ctx context.Context, id uuid.UUID) error {
+	_, err := q.db.Exec(ctx, completeReservation, id)
 	return err
 }
 
@@ -127,7 +104,7 @@ VALUES ($1, $2,
         WHEN (
             SELECT COUNT(*) FROM claimctl.reservations
             WHERE resource_id = $1 AND status IN ('pending', 'active')
-        ) = 0 THEN EXTRACT(EPOCH FROM NOW())::BIGINT
+        ) = 0 THEN FLOOR(EXTRACT(EPOCH FROM statement_timestamp()))::BIGINT
         ELSE NULL
     END,
     $3,
@@ -138,9 +115,9 @@ VALUES ($1, $2,
         ) = 0 AND $3::INTERVAL IS NOT NULL THEN NOW() + $3::INTERVAL
         ELSE NULL
     END,
-    EXTRACT(EPOCH FROM NOW())::BIGINT
+    FLOOR(EXTRACT(EPOCH FROM statement_timestamp()))::BIGINT
 )
-RETURNING id, resource_id, user_id, status, queue_position, start_time, end_time, created_at, updated_at, scheduled_end_time, duration
+RETURNING id, resource_id, user_id, status, queue_position, start_time, end_time, created_at, updated_at, scheduled_end_time, duration, lease_duration, lease_expires_at, hard_end_time
 `
 
 type CreateReservationParams struct {
@@ -164,28 +141,26 @@ func (q *Queries) CreateReservation(ctx context.Context, arg CreateReservationPa
 		&i.UpdatedAt,
 		&i.ScheduledEndTime,
 		&i.Duration,
+		&i.LeaseDuration,
+		&i.LeaseExpiresAt,
+		&i.HardEndTime,
 	)
 	return i, err
 }
 
 const expireReservation = `-- name: ExpireReservation :exec
 UPDATE claimctl.reservations
-SET status='completed', end_time=EXTRACT(EPOCH FROM NOW())::BIGINT, updated_at=$2
+SET status='completed', end_time=GREATEST(start_time, FLOOR(EXTRACT(EPOCH FROM statement_timestamp()))::BIGINT), updated_at=FLOOR(EXTRACT(EPOCH FROM statement_timestamp()))::BIGINT
 WHERE id=$1
 `
 
-type ExpireReservationParams struct {
-	ID        uuid.UUID   `json:"id"`
-	UpdatedAt pgtype.Int8 `json:"updatedAt"`
-}
-
-func (q *Queries) ExpireReservation(ctx context.Context, arg ExpireReservationParams) error {
-	_, err := q.db.Exec(ctx, expireReservation, arg.ID, arg.UpdatedAt)
+func (q *Queries) ExpireReservation(ctx context.Context, id uuid.UUID) error {
+	_, err := q.db.Exec(ctx, expireReservation, id)
 	return err
 }
 
 const findActiveReservationByResource = `-- name: FindActiveReservationByResource :one
-SELECT id, resource_id, user_id, status, queue_position, start_time, end_time, created_at, updated_at, scheduled_end_time, duration FROM claimctl.reservations
+SELECT id, resource_id, user_id, status, queue_position, start_time, end_time, created_at, updated_at, scheduled_end_time, duration, lease_duration, lease_expires_at, hard_end_time FROM claimctl.reservations
 WHERE resource_id=$1 AND status='active'
 `
 
@@ -204,12 +179,15 @@ func (q *Queries) FindActiveReservationByResource(ctx context.Context, resourceI
 		&i.UpdatedAt,
 		&i.ScheduledEndTime,
 		&i.Duration,
+		&i.LeaseDuration,
+		&i.LeaseExpiresAt,
+		&i.HardEndTime,
 	)
 	return i, err
 }
 
 const findAllReservations = `-- name: FindAllReservations :many
-SELECT r.id, r.resource_id, r.user_id, r.status, r.queue_position, r.start_time, r.end_time, r.created_at, r.updated_at, r.scheduled_end_time, r.duration, u.name as user_name, res.name as resource_name
+SELECT r.id, r.resource_id, r.user_id, r.status, r.queue_position, r.start_time, r.end_time, r.created_at, r.updated_at, r.scheduled_end_time, r.duration, r.lease_duration, r.lease_expires_at, r.hard_end_time, u.name as user_name, res.name as resource_name
 FROM claimctl.reservations r
 JOIN claimctl.users u ON r.user_id = u.id
 JOIN claimctl.resources res ON r.resource_id = res.id
@@ -228,6 +206,9 @@ type FindAllReservationsRow struct {
 	UpdatedAt        pgtype.Int8        `json:"updatedAt"`
 	ScheduledEndTime pgtype.Timestamptz `json:"scheduledEndTime"`
 	Duration         pgtype.Interval    `json:"duration"`
+	LeaseDuration    pgtype.Interval    `json:"leaseDuration"`
+	LeaseExpiresAt   pgtype.Timestamptz `json:"leaseExpiresAt"`
+	HardEndTime      pgtype.Timestamptz `json:"hardEndTime"`
 	UserName         string             `json:"userName"`
 	ResourceName     string             `json:"resourceName"`
 }
@@ -253,6 +234,9 @@ func (q *Queries) FindAllReservations(ctx context.Context) ([]FindAllReservation
 			&i.UpdatedAt,
 			&i.ScheduledEndTime,
 			&i.Duration,
+			&i.LeaseDuration,
+			&i.LeaseExpiresAt,
+			&i.HardEndTime,
 			&i.UserName,
 			&i.ResourceName,
 		); err != nil {
@@ -267,8 +251,11 @@ func (q *Queries) FindAllReservations(ctx context.Context) ([]FindAllReservation
 }
 
 const findExpiredActiveReservations = `-- name: FindExpiredActiveReservations :many
-SELECT id, resource_id, user_id, status, queue_position, start_time, end_time, created_at, updated_at, scheduled_end_time, duration FROM claimctl.reservations
-WHERE status='active' AND scheduled_end_time IS NOT NULL AND scheduled_end_time < NOW()
+SELECT id, resource_id, user_id, status, queue_position, start_time, end_time, created_at, updated_at, scheduled_end_time, duration, lease_duration, lease_expires_at, hard_end_time FROM claimctl.reservations
+WHERE status IN ('active', 'pending') AND
+    (scheduled_end_time <= statement_timestamp() OR lease_expires_at <= statement_timestamp()
+        OR hard_end_time <= statement_timestamp())
+ORDER BY resource_id, id LIMIT 1000
 `
 
 func (q *Queries) FindExpiredActiveReservations(ctx context.Context) ([]ClaimctlReservation, error) {
@@ -292,6 +279,9 @@ func (q *Queries) FindExpiredActiveReservations(ctx context.Context) ([]Claimctl
 			&i.UpdatedAt,
 			&i.ScheduledEndTime,
 			&i.Duration,
+			&i.LeaseDuration,
+			&i.LeaseExpiresAt,
+			&i.HardEndTime,
 		); err != nil {
 			return nil, err
 		}
@@ -304,7 +294,7 @@ func (q *Queries) FindExpiredActiveReservations(ctx context.Context) ([]Claimctl
 }
 
 const findPendingReservationsByResource = `-- name: FindPendingReservationsByResource :many
-SELECT id, resource_id, user_id, status, queue_position, start_time, end_time, created_at, updated_at, scheduled_end_time, duration FROM claimctl.reservations
+SELECT id, resource_id, user_id, status, queue_position, start_time, end_time, created_at, updated_at, scheduled_end_time, duration, lease_duration, lease_expires_at, hard_end_time FROM claimctl.reservations
 WHERE resource_id=$1 AND status='pending'
 ORDER BY queue_position
 `
@@ -330,6 +320,9 @@ func (q *Queries) FindPendingReservationsByResource(ctx context.Context, resourc
 			&i.UpdatedAt,
 			&i.ScheduledEndTime,
 			&i.Duration,
+			&i.LeaseDuration,
+			&i.LeaseExpiresAt,
+			&i.HardEndTime,
 		); err != nil {
 			return nil, err
 		}
@@ -342,7 +335,7 @@ func (q *Queries) FindPendingReservationsByResource(ctx context.Context, resourc
 }
 
 const findReservationById = `-- name: FindReservationById :one
-SELECT id, resource_id, user_id, status, queue_position, start_time, end_time, created_at, updated_at, scheduled_end_time, duration FROM claimctl.reservations WHERE id=$1
+SELECT id, resource_id, user_id, status, queue_position, start_time, end_time, created_at, updated_at, scheduled_end_time, duration, lease_duration, lease_expires_at, hard_end_time FROM claimctl.reservations WHERE id=$1
 `
 
 func (q *Queries) FindReservationById(ctx context.Context, id uuid.UUID) (ClaimctlReservation, error) {
@@ -360,12 +353,15 @@ func (q *Queries) FindReservationById(ctx context.Context, id uuid.UUID) (Claimc
 		&i.UpdatedAt,
 		&i.ScheduledEndTime,
 		&i.Duration,
+		&i.LeaseDuration,
+		&i.LeaseExpiresAt,
+		&i.HardEndTime,
 	)
 	return i, err
 }
 
 const findReservationsByResource = `-- name: FindReservationsByResource :many
-SELECT r.id, r.resource_id, r.user_id, r.status, r.queue_position, r.start_time, r.end_time, r.created_at, r.updated_at, r.scheduled_end_time, r.duration, u.name as user_name
+SELECT r.id, r.resource_id, r.user_id, r.status, r.queue_position, r.start_time, r.end_time, r.created_at, r.updated_at, r.scheduled_end_time, r.duration, r.lease_duration, r.lease_expires_at, r.hard_end_time, u.name as user_name
 FROM claimctl.reservations r
 JOIN claimctl.users u ON r.user_id = u.id
 WHERE r.resource_id=$1
@@ -384,6 +380,9 @@ type FindReservationsByResourceRow struct {
 	UpdatedAt        pgtype.Int8        `json:"updatedAt"`
 	ScheduledEndTime pgtype.Timestamptz `json:"scheduledEndTime"`
 	Duration         pgtype.Interval    `json:"duration"`
+	LeaseDuration    pgtype.Interval    `json:"leaseDuration"`
+	LeaseExpiresAt   pgtype.Timestamptz `json:"leaseExpiresAt"`
+	HardEndTime      pgtype.Timestamptz `json:"hardEndTime"`
 	UserName         string             `json:"userName"`
 }
 
@@ -408,6 +407,9 @@ func (q *Queries) FindReservationsByResource(ctx context.Context, resourceID uui
 			&i.UpdatedAt,
 			&i.ScheduledEndTime,
 			&i.Duration,
+			&i.LeaseDuration,
+			&i.LeaseExpiresAt,
+			&i.HardEndTime,
 			&i.UserName,
 		); err != nil {
 			return nil, err
@@ -421,7 +423,7 @@ func (q *Queries) FindReservationsByResource(ctx context.Context, resourceID uui
 }
 
 const findReservationsByUser = `-- name: FindReservationsByUser :many
-SELECT r.id, r.resource_id, r.user_id, r.status, r.queue_position, r.start_time, r.end_time, r.created_at, r.updated_at, r.scheduled_end_time, r.duration, res.name as resource_name, res.type as resource_type
+SELECT r.id, r.resource_id, r.user_id, r.status, r.queue_position, r.start_time, r.end_time, r.created_at, r.updated_at, r.scheduled_end_time, r.duration, r.lease_duration, r.lease_expires_at, r.hard_end_time, res.name as resource_name, res.type as resource_type
 FROM claimctl.reservations r
 JOIN claimctl.resources res ON r.resource_id = res.id
 WHERE r.user_id=$1
@@ -440,6 +442,9 @@ type FindReservationsByUserRow struct {
 	UpdatedAt        pgtype.Int8        `json:"updatedAt"`
 	ScheduledEndTime pgtype.Timestamptz `json:"scheduledEndTime"`
 	Duration         pgtype.Interval    `json:"duration"`
+	LeaseDuration    pgtype.Interval    `json:"leaseDuration"`
+	LeaseExpiresAt   pgtype.Timestamptz `json:"leaseExpiresAt"`
+	HardEndTime      pgtype.Timestamptz `json:"hardEndTime"`
 	ResourceName     string             `json:"resourceName"`
 	ResourceType     string             `json:"resourceType"`
 }
@@ -465,6 +470,9 @@ func (q *Queries) FindReservationsByUser(ctx context.Context, userID uuid.UUID) 
 			&i.UpdatedAt,
 			&i.ScheduledEndTime,
 			&i.Duration,
+			&i.LeaseDuration,
+			&i.LeaseExpiresAt,
+			&i.HardEndTime,
 			&i.ResourceName,
 			&i.ResourceType,
 		); err != nil {
@@ -479,7 +487,7 @@ func (q *Queries) FindReservationsByUser(ctx context.Context, userID uuid.UUID) 
 }
 
 const findUserActiveReservations = `-- name: FindUserActiveReservations :many
-SELECT r.id, r.resource_id, r.user_id, r.status, r.queue_position, r.start_time, r.end_time, r.created_at, r.updated_at, r.scheduled_end_time, r.duration, res.name as resource_name, res.type as resource_type
+SELECT r.id, r.resource_id, r.user_id, r.status, r.queue_position, r.start_time, r.end_time, r.created_at, r.updated_at, r.scheduled_end_time, r.duration, r.lease_duration, r.lease_expires_at, r.hard_end_time, res.name as resource_name, res.type as resource_type
 FROM claimctl.reservations r
 JOIN claimctl.resources res ON r.resource_id = res.id
 WHERE r.user_id=$1 AND r.status IN ('pending', 'active')
@@ -498,6 +506,9 @@ type FindUserActiveReservationsRow struct {
 	UpdatedAt        pgtype.Int8        `json:"updatedAt"`
 	ScheduledEndTime pgtype.Timestamptz `json:"scheduledEndTime"`
 	Duration         pgtype.Interval    `json:"duration"`
+	LeaseDuration    pgtype.Interval    `json:"leaseDuration"`
+	LeaseExpiresAt   pgtype.Timestamptz `json:"leaseExpiresAt"`
+	HardEndTime      pgtype.Timestamptz `json:"hardEndTime"`
 	ResourceName     string             `json:"resourceName"`
 	ResourceType     string             `json:"resourceType"`
 }
@@ -523,6 +534,9 @@ func (q *Queries) FindUserActiveReservations(ctx context.Context, userID uuid.UU
 			&i.UpdatedAt,
 			&i.ScheduledEndTime,
 			&i.Duration,
+			&i.LeaseDuration,
+			&i.LeaseExpiresAt,
+			&i.HardEndTime,
 			&i.ResourceName,
 			&i.ResourceType,
 		); err != nil {
@@ -537,7 +551,7 @@ func (q *Queries) FindUserActiveReservations(ctx context.Context, userID uuid.UU
 }
 
 const findUserReservationForResource = `-- name: FindUserReservationForResource :one
-SELECT id, resource_id, user_id, status, queue_position, start_time, end_time, created_at, updated_at, scheduled_end_time, duration FROM claimctl.reservations
+SELECT id, resource_id, user_id, status, queue_position, start_time, end_time, created_at, updated_at, scheduled_end_time, duration, lease_duration, lease_expires_at, hard_end_time FROM claimctl.reservations
 WHERE user_id=$1 AND resource_id=$2 AND status IN ('pending', 'active')
 ORDER BY
     CASE status
@@ -568,12 +582,15 @@ func (q *Queries) FindUserReservationForResource(ctx context.Context, arg FindUs
 		&i.UpdatedAt,
 		&i.ScheduledEndTime,
 		&i.Duration,
+		&i.LeaseDuration,
+		&i.LeaseExpiresAt,
+		&i.HardEndTime,
 	)
 	return i, err
 }
 
 const getNextInQueue = `-- name: GetNextInQueue :one
-SELECT id, resource_id, user_id, status, queue_position, start_time, end_time, created_at, updated_at, scheduled_end_time, duration FROM claimctl.reservations
+SELECT id, resource_id, user_id, status, queue_position, start_time, end_time, created_at, updated_at, scheduled_end_time, duration, lease_duration, lease_expires_at, hard_end_time FROM claimctl.reservations
 WHERE resource_id=$1 AND status='pending'
 ORDER BY queue_position
 LIMIT 1
@@ -594,12 +611,15 @@ func (q *Queries) GetNextInQueue(ctx context.Context, resourceID uuid.UUID) (Cla
 		&i.UpdatedAt,
 		&i.ScheduledEndTime,
 		&i.Duration,
+		&i.LeaseDuration,
+		&i.LeaseExpiresAt,
+		&i.HardEndTime,
 	)
 	return i, err
 }
 
 const getQueueForResource = `-- name: GetQueueForResource :many
-SELECT r.id, r.user_id, r.status, r.queue_position, r.start_time, r.end_time, r.scheduled_end_time, r.created_at, r.duration, u.name as user_name, u.email as user_email
+SELECT r.id, r.user_id, r.status, r.queue_position, r.start_time, r.end_time, r.scheduled_end_time, r.created_at, r.duration, r.lease_expires_at, r.hard_end_time, u.name as user_name, u.email as user_email
 FROM claimctl.reservations r
 JOIN claimctl.users u ON r.user_id = u.id
 WHERE r.resource_id=$1 AND r.status IN ('active', 'pending')
@@ -621,6 +641,8 @@ type GetQueueForResourceRow struct {
 	ScheduledEndTime pgtype.Timestamptz `json:"scheduledEndTime"`
 	CreatedAt        pgtype.Int8        `json:"createdAt"`
 	Duration         pgtype.Interval    `json:"duration"`
+	LeaseExpiresAt   pgtype.Timestamptz `json:"leaseExpiresAt"`
+	HardEndTime      pgtype.Timestamptz `json:"hardEndTime"`
 	UserName         string             `json:"userName"`
 	UserEmail        string             `json:"userEmail"`
 }
@@ -644,6 +666,8 @@ func (q *Queries) GetQueueForResource(ctx context.Context, resourceID uuid.UUID)
 			&i.ScheduledEndTime,
 			&i.CreatedAt,
 			&i.Duration,
+			&i.LeaseExpiresAt,
+			&i.HardEndTime,
 			&i.UserName,
 			&i.UserEmail,
 		); err != nil {
@@ -677,34 +701,28 @@ func (q *Queries) GetUserQueuePosition(ctx context.Context, arg GetUserQueuePosi
 
 const promoteNextInQueue = `-- name: PromoteNextInQueue :exec
 UPDATE claimctl.reservations r
-SET queue_position = queue_position - 1, updated_at = $2
+SET queue_position = queue_position - 1, updated_at = FLOOR(EXTRACT(EPOCH FROM statement_timestamp()))::BIGINT
 WHERE r.resource_id=$1 AND r.status='pending' AND r.queue_position > 1
 `
 
-type PromoteNextInQueueParams struct {
-	ResourceID uuid.UUID   `json:"resourceId"`
-	UpdatedAt  pgtype.Int8 `json:"updatedAt"`
-}
-
-func (q *Queries) PromoteNextInQueue(ctx context.Context, arg PromoteNextInQueueParams) error {
-	_, err := q.db.Exec(ctx, promoteNextInQueue, arg.ResourceID, arg.UpdatedAt)
+func (q *Queries) PromoteNextInQueue(ctx context.Context, resourceID uuid.UUID) error {
+	_, err := q.db.Exec(ctx, promoteNextInQueue, resourceID)
 	return err
 }
 
 const updateQueuePositions = `-- name: UpdateQueuePositions :exec
 UPDATE claimctl.reservations r
-SET queue_position = queue_position - 1, updated_at = $2
-WHERE r.resource_id=$1 AND r.status='pending' AND r.queue_position > $3
+SET queue_position = queue_position - 1, updated_at = FLOOR(EXTRACT(EPOCH FROM statement_timestamp()))::BIGINT
+WHERE r.resource_id=$1 AND r.status='pending' AND r.queue_position > $2
 `
 
 type UpdateQueuePositionsParams struct {
 	ResourceID    uuid.UUID   `json:"resourceId"`
-	UpdatedAt     pgtype.Int8 `json:"updatedAt"`
 	QueuePosition pgtype.Int4 `json:"queuePosition"`
 }
 
 func (q *Queries) UpdateQueuePositions(ctx context.Context, arg UpdateQueuePositionsParams) error {
-	_, err := q.db.Exec(ctx, updateQueuePositions, arg.ResourceID, arg.UpdatedAt, arg.QueuePosition)
+	_, err := q.db.Exec(ctx, updateQueuePositions, arg.ResourceID, arg.QueuePosition)
 	return err
 }
 

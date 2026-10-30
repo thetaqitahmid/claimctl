@@ -13,17 +13,24 @@ import (
 
 type Querier interface {
 	AcquireResourceLock(ctx context.Context, id uuid.UUID) (uuid.UUID, error)
-	ActivateReservation(ctx context.Context, arg ActivateReservationParams) error
+	AcquireWorkerLease(ctx context.Context, arg AcquireWorkerLeaseParams) (uuid.UUID, error)
+	ActivateReservation(ctx context.Context, id uuid.UUID) (int64, error)
 	AddReservationHistoryLog(ctx context.Context, arg AddReservationHistoryLogParams) (ClaimctlReservationHistory, error)
 	AddResourceWebhook(ctx context.Context, arg AddResourceWebhookParams) error
 	AddSpacePermission(ctx context.Context, arg AddSpacePermissionParams) error
 	AddUserToGroup(ctx context.Context, arg AddUserToGroupParams) error
-	CancelAllReservationsForResource(ctx context.Context, arg CancelAllReservationsForResourceParams) error
-	CancelReservation(ctx context.Context, arg CancelReservationParams) error
+	CancelAllReservationsForResource(ctx context.Context, resourceID uuid.UUID) error
+	CancelReservation(ctx context.Context, id uuid.UUID) error
+	ClaimWebhookDelivery(ctx context.Context, fence pgtype.UUID) (ClaimctlWebhookOutbox, error)
+	CleanupDeliveredWebhooks(ctx context.Context, cutoff pgtype.Timestamptz) error
 	CleanupOldHealthStatus(ctx context.Context, checkedAt int64) error
 	CleanupOldWebhookLogs(ctx context.Context, createdAt pgtype.Timestamp) error
-	CompleteReservation(ctx context.Context, arg CompleteReservationParams) error
+	CleanupRateLimits(ctx context.Context) error
+	CleanupReplicaState(ctx context.Context) error
+	CleanupSharedValues(ctx context.Context) error
+	CompleteReservation(ctx context.Context, id uuid.UUID) error
 	CountAdminUsers(ctx context.Context) (int64, error)
+	CountLiveClaims(ctx context.Context, userID uuid.UUID) (int64, error)
 	CountPendingReservations(ctx context.Context, resourceID uuid.UUID) (int64, error)
 	CreateAPIToken(ctx context.Context, arg CreateAPITokenParams) (ClaimctlApiToken, error)
 	CreateAuditLog(ctx context.Context, arg CreateAuditLogParams) (ClaimctlAuditLog, error)
@@ -43,15 +50,18 @@ type Querier interface {
 	DeleteRefreshToken(ctx context.Context, tokenHash string) error
 	DeleteResourceById(ctx context.Context, id uuid.UUID) error
 	DeleteSecret(ctx context.Context, id uuid.UUID) error
+	DeleteSharedValue(ctx context.Context, key string) error
 	DeleteSpace(ctx context.Context, id uuid.UUID) error
 	DeleteUserById(ctx context.Context, id uuid.UUID) error
 	DeleteWebhook(ctx context.Context, id uuid.UUID) error
-	ExpireReservation(ctx context.Context, arg ExpireReservationParams) error
+	ExpireReservation(ctx context.Context, id uuid.UUID) error
 	FindActiveReservationByResource(ctx context.Context, resourceID uuid.UUID) (ClaimctlReservation, error)
 	FindAllReservations(ctx context.Context) ([]FindAllReservationsRow, error)
 	FindAllResources(ctx context.Context) ([]ClaimctlResource, error)
 	FindAllUsers(ctx context.Context) ([]ClaimctlUser, error)
+	FindClaimCandidates(ctx context.Context) ([]ClaimctlResource, error)
 	FindExpiredActiveReservations(ctx context.Context) ([]ClaimctlReservation, error)
+	FindMetricReservations(ctx context.Context, resourceID uuid.UUID) ([]ClaimctlReservation, error)
 	FindPendingReservationsByResource(ctx context.Context, resourceID uuid.UUID) ([]ClaimctlReservation, error)
 	FindReservationById(ctx context.Context, id uuid.UUID) (ClaimctlReservation, error)
 	FindReservationsByResource(ctx context.Context, resourceID uuid.UUID) ([]FindReservationsByResourceRow, error)
@@ -61,13 +71,18 @@ type Querier interface {
 	FindUserActiveReservations(ctx context.Context, userID uuid.UUID) ([]FindUserActiveReservationsRow, error)
 	FindUserByEmail(ctx context.Context, email string) (ClaimctlUser, error)
 	FindUserById(ctx context.Context, id uuid.UUID) (ClaimctlUser, error)
+	FindUserByIdForUpdate(ctx context.Context, id uuid.UUID) (ClaimctlUser, error)
 	FindUserByOIDCSubject(ctx context.Context, oidcSubject pgtype.Text) (ClaimctlUser, error)
 	FindUserReservationForResource(ctx context.Context, arg FindUserReservationForResourceParams) (ClaimctlReservation, error)
+	FinishWebhookDelivery(ctx context.Context, arg FinishWebhookDeliveryParams) (int64, error)
+	FinishWorkerLease(ctx context.Context, arg FinishWorkerLeaseParams) (int64, error)
 	GetAPITokenByHash(ctx context.Context, tokenHash string) (ClaimctlApiToken, error)
 	GetAllEnabledHealthConfigs(ctx context.Context) ([]ClaimctlResourceHealthConfig, error)
 	GetAllResourcesWithReservationStatus(ctx context.Context) ([]GetAllResourcesWithReservationStatusRow, error)
 	GetAllResourcesWithReservationStatusForUser(ctx context.Context, userID pgtype.UUID) ([]GetAllResourcesWithReservationStatusForUserRow, error)
 	GetAuditLogs(ctx context.Context, arg GetAuditLogsParams) ([]GetAuditLogsRow, error)
+	GetBundleIdempotency(ctx context.Context, arg GetBundleIdempotencyParams) (ClaimctlBundleIdempotency, error)
+	GetClaimIdempotency(ctx context.Context, arg GetClaimIdempotencyParams) (ClaimctlClaimIdempotency, error)
 	GetGroup(ctx context.Context, id uuid.UUID) (ClaimctlGroup, error)
 	GetGroupByName(ctx context.Context, name string) (ClaimctlGroup, error)
 	GetHealthConfig(ctx context.Context, resourceID uuid.UUID) (ClaimctlResourceHealthConfig, error)
@@ -79,6 +94,7 @@ type Querier interface {
 	GetQueueForResource(ctx context.Context, resourceID uuid.UUID) ([]GetQueueForResourceRow, error)
 	GetRecentHistoryByAction(ctx context.Context, arg GetRecentHistoryByActionParams) ([]GetRecentHistoryByActionRow, error)
 	GetRefreshTokenByHash(ctx context.Context, tokenHash string) (ClaimctlRefreshToken, error)
+	GetRefreshTokenByHashForUpdate(ctx context.Context, tokenHash string) (ClaimctlRefreshToken, error)
 	GetReservationHistory(ctx context.Context, reservationID pgtype.UUID) ([]GetReservationHistoryRow, error)
 	GetResourceMaintenanceStatus(ctx context.Context, id uuid.UUID) (pgtype.Bool, error)
 	GetResourceName(ctx context.Context, id uuid.UUID) (string, error)
@@ -92,6 +108,7 @@ type Querier interface {
 	GetSecretByKey(ctx context.Context, key string) (ClaimctlSecret, error)
 	GetSetting(ctx context.Context, key string) (AppSetting, error)
 	GetSettings(ctx context.Context) ([]AppSetting, error)
+	GetSharedValue(ctx context.Context, key string) ([]byte, error)
 	GetSpace(ctx context.Context, id uuid.UUID) (ClaimctlSpace, error)
 	GetSpaceByName(ctx context.Context, name string) (ClaimctlSpace, error)
 	GetSpacePermissions(ctx context.Context, spaceID pgtype.UUID) ([]GetSpacePermissionsRow, error)
@@ -104,23 +121,40 @@ type Querier interface {
 	GetWebhookLogs(ctx context.Context, arg GetWebhookLogsParams) ([]ClaimctlWebhookLog, error)
 	GetWebhooksForEvent(ctx context.Context, arg GetWebhooksForEventParams) ([]ClaimctlWebhook, error)
 	HasSpacePermission(ctx context.Context, arg HasSpacePermissionParams) (bool, error)
+	IncrementRateLimit(ctx context.Context, arg IncrementRateLimitParams) (IncrementRateLimitRow, error)
 	ListAPITokens(ctx context.Context, userID uuid.UUID) ([]ClaimctlApiToken, error)
 	ListGroupMembers(ctx context.Context, groupID uuid.UUID) ([]ListGroupMembersRow, error)
 	ListGroups(ctx context.Context) ([]ClaimctlGroup, error)
+	ListRealtimeEvents(ctx context.Context, id int64) ([]ClaimctlRealtimeEvent, error)
 	ListSecrets(ctx context.Context) ([]ClaimctlSecret, error)
 	ListSpaces(ctx context.Context) ([]ClaimctlSpace, error)
 	ListSpacesForUser(ctx context.Context, userID pgtype.UUID) ([]ClaimctlSpace, error)
+	ListWebhookDeliveries(ctx context.Context, webhookID uuid.UUID) ([]ListWebhookDeliveriesRow, error)
 	ListWebhooks(ctx context.Context) ([]ClaimctlWebhook, error)
+	LockClaimUser(ctx context.Context, id uuid.UUID) (ClaimctlUser, error)
+	LockJWTInitialization(ctx context.Context) error
+	LockRealtimeMutation(ctx context.Context) error
 	LogMaintenanceChange(ctx context.Context, arg LogMaintenanceChangeParams) (ClaimctlMaintenanceAuditLog, error)
-	PromoteNextInQueue(ctx context.Context, arg PromoteNextInQueueParams) error
+	PromoteNextInQueue(ctx context.Context, resourceID uuid.UUID) error
+	RealtimeBounds(ctx context.Context) (RealtimeBoundsRow, error)
+	ReclaimResourceReservations(ctx context.Context, resourceID uuid.UUID) ([]ClaimctlReservation, error)
 	RemoveResourceWebhook(ctx context.Context, arg RemoveResourceWebhookParams) error
 	RemoveSpacePermission(ctx context.Context, arg RemoveSpacePermissionParams) error
 	RemoveUserFromGroup(ctx context.Context, arg RemoveUserFromGroupParams) error
+	RenewReservationLease(ctx context.Context, arg RenewReservationLeaseParams) (ClaimctlReservation, error)
+	ResetSharedValues(ctx context.Context) error
 	ResetUserFailedLoginAttempts(ctx context.Context, id uuid.UUID) error
 	RevokeAPIToken(ctx context.Context, arg RevokeAPITokenParams) error
 	RevokeAllUserRefreshTokens(ctx context.Context, userID uuid.UUID) error
+	RevokeRefreshToken(ctx context.Context, tokenHash string) error
 	RevokeRefreshTokenFamily(ctx context.Context, familyID uuid.UUID) error
+	SaveBundleIdempotency(ctx context.Context, arg SaveBundleIdempotencyParams) error
+	SaveClaimIdempotency(ctx context.Context, arg SaveClaimIdempotencyParams) error
+	SetPendingQueuePosition(ctx context.Context, arg SetPendingQueuePositionParams) error
+	SetReservationLifetime(ctx context.Context, arg SetReservationLifetimeParams) (ClaimctlReservation, error)
 	SetResourceMaintenanceMode(ctx context.Context, arg SetResourceMaintenanceModeParams) (ClaimctlResource, error)
+	SetSharedValue(ctx context.Context, arg SetSharedValueParams) error
+	TryWorkerTransactionLock(ctx context.Context, name string) (bool, error)
 	UpdateAPITokenLastUsed(ctx context.Context, id uuid.UUID) error
 	UpdateGroup(ctx context.Context, arg UpdateGroupParams) (ClaimctlGroup, error)
 	UpdateOIDCUser(ctx context.Context, arg UpdateOIDCUserParams) error

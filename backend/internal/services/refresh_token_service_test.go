@@ -20,11 +20,12 @@ func TestRefreshTokenService_Issue(t *testing.T) {
 
 	userID := testutils.TestUUID(1)
 
+	mockDB.On("FindUserByIdForUpdate", ctx, userID).Return(db.ClaimctlUser{ID: userID, Status: "active", Password: "hash"}, nil)
 	mockDB.On("CreateRefreshToken", ctx, mock.MatchedBy(func(p db.CreateRefreshTokenParams) bool {
 		return p.UserID == userID && len(p.TokenHash) > 0 && p.FamilyID != uuid.Nil
 	})).Return(db.ClaimctlRefreshToken{ID: testutils.TestUUID(2)}, nil)
 
-	raw, err := svc.Issue(ctx, userID)
+	raw, err := svc.Issue(ctx, userID, CredentialVersion("hash"))
 
 	assert.NoError(t, err)
 	assert.True(t, len(raw) > 0)
@@ -52,16 +53,19 @@ func TestRefreshTokenService_Rotate_Success(t *testing.T) {
 	}
 
 	mockDB.On("GetRefreshTokenByHash", ctx, hash).Return(existing, nil)
-	mockDB.On("DeleteRefreshToken", ctx, hash).Return(nil)
+	mockDB.On("FindUserByIdForUpdate", ctx, userID).Return(db.ClaimctlUser{ID: userID, Status: "active", Password: "hash"}, nil)
+	mockDB.On("GetRefreshTokenByHashForUpdate", ctx, hash).Return(existing, nil)
+	mockDB.On("RevokeRefreshToken", ctx, hash).Return(nil)
 	mockDB.On("CreateRefreshToken", ctx, mock.MatchedBy(func(p db.CreateRefreshTokenParams) bool {
 		return p.UserID == userID && p.FamilyID == familyID
 	})).Return(db.ClaimctlRefreshToken{ID: testutils.TestUUID(4)}, nil)
 
-	newRaw, gotUserID, err := svc.Rotate(ctx, rawToken)
+	newRaw, user, err := svc.Rotate(ctx, rawToken)
 
 	assert.NoError(t, err)
 	assert.NotEmpty(t, newRaw)
-	assert.Equal(t, userID, gotUserID)
+	assert.Equal(t, userID, user.ID)
+	assert.Equal(t, "hash", user.Password)
 	mockDB.AssertExpectations(t)
 }
 
@@ -75,12 +79,15 @@ func TestRefreshTokenService_Rotate_TheftDetection(t *testing.T) {
 	hash := hashToken(rawToken)
 
 	revoked := db.ClaimctlRefreshToken{
+		UserID:    testutils.TestUUID(1),
 		TokenHash: hash,
 		FamilyID:  familyID,
 		Revoked:   true,
 	}
 
 	mockDB.On("GetRefreshTokenByHash", ctx, hash).Return(revoked, nil)
+	mockDB.On("FindUserByIdForUpdate", ctx, revoked.UserID).Return(db.ClaimctlUser{ID: revoked.UserID, Status: "active"}, nil)
+	mockDB.On("GetRefreshTokenByHashForUpdate", ctx, hash).Return(revoked, nil)
 	mockDB.On("RevokeRefreshTokenFamily", ctx, familyID).Return(nil)
 
 	_, _, err := svc.Rotate(ctx, rawToken)
@@ -98,6 +105,7 @@ func TestRefreshTokenService_Rotate_Expired(t *testing.T) {
 	hash := hashToken(rawToken)
 
 	expired := db.ClaimctlRefreshToken{
+		UserID:    testutils.TestUUID(1),
 		TokenHash: hash,
 		FamilyID:  testutils.TestUUID(1),
 		ExpiresAt: pgtype.Timestamptz{Time: time.Now().Add(-1 * time.Hour), Valid: true},
@@ -105,6 +113,8 @@ func TestRefreshTokenService_Rotate_Expired(t *testing.T) {
 	}
 
 	mockDB.On("GetRefreshTokenByHash", ctx, hash).Return(expired, nil)
+	mockDB.On("FindUserByIdForUpdate", ctx, expired.UserID).Return(db.ClaimctlUser{ID: expired.UserID, Status: "active"}, nil)
+	mockDB.On("GetRefreshTokenByHashForUpdate", ctx, hash).Return(expired, nil)
 
 	_, _, err := svc.Rotate(ctx, rawToken)
 
@@ -122,11 +132,13 @@ func TestRefreshTokenService_Revoke(t *testing.T) {
 	hash := hashToken(rawToken)
 
 	record := db.ClaimctlRefreshToken{
+		UserID:    testutils.TestUUID(1),
 		TokenHash: hash,
 		FamilyID:  familyID,
 	}
 
 	mockDB.On("GetRefreshTokenByHash", ctx, hash).Return(record, nil)
+	mockDB.On("FindUserByIdForUpdate", ctx, record.UserID).Return(db.ClaimctlUser{ID: record.UserID}, nil)
 	mockDB.On("RevokeRefreshTokenFamily", ctx, familyID).Return(nil)
 
 	err := svc.Revoke(ctx, rawToken)
@@ -142,6 +154,7 @@ func TestRefreshTokenService_RevokeAllByUser(t *testing.T) {
 
 	userID := testutils.TestUUID(1)
 
+	mockDB.On("FindUserByIdForUpdate", ctx, userID).Return(db.ClaimctlUser{ID: userID}, nil)
 	mockDB.On("RevokeAllUserRefreshTokens", ctx, userID).Return(nil)
 
 	err := svc.RevokeAllByUser(ctx, userID)

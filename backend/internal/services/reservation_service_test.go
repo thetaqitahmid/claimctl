@@ -7,6 +7,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
@@ -78,21 +79,21 @@ func TestReservationService_CreateReservation(t *testing.T) {
 
 	tests := []struct {
 		name          string
-		userID uuid.UUID
-		resourceID uuid.UUID
+		userID        uuid.UUID
+		resourceID    uuid.UUID
 		mockSetup     func()
 		expectedError string
 		shouldSucceed bool
 	}{
 		{
 			name:       "Successful reservation creation",
-			userID: testutils.TestUUID(1),
+			userID:     testutils.TestUUID(1),
 			resourceID: testutils.TestUUID(1),
 			mockSetup: func() {
 				// Check maintenance status
-				mockDB.On("GetResourceMaintenanceStatus", ctx, testutils.TestUUID(1)).Return(pgtype.Bool{Bool: false, Valid: true}, nil)
+				mockDB.On("GetResourceMaintenanceStatus", ctx, testutils.TestUUID(1)).Return(pgtype.Bool{Bool: false, Valid: true}, nil).Maybe()
 				// No existing reservation found
-				mockDB.On("FindUserReservationForResource", ctx, mock.AnythingOfType("db.FindUserReservationForResourceParams")).Return(db.ClaimctlReservation{}, assert.AnError)
+				mockDB.On("FindUserReservationForResource", ctx, mock.AnythingOfType("db.FindUserReservationForResourceParams")).Return(db.ClaimctlReservation{}, pgx.ErrNoRows)
 				// Create reservation
 				reservation := testutils.CreateTestReservation(testutils.TestUUID(1), testutils.TestUUID(1), testutils.TestUUID(1), "pending", 1)
 				mockDB.On("CreateReservation", ctx, mock.AnythingOfType("db.CreateReservationParams")).Return(reservation, nil)
@@ -102,40 +103,35 @@ func TestReservationService_CreateReservation(t *testing.T) {
 
 				mockNotification.On("Notify", mock.Anything, testutils.TestUUID(1), "reservation_created", mock.Anything).Return(nil)
 
-				// Mock webhooks trigger
-				mockDB.On("GetWebhooksForEvent", ctx, mock.MatchedBy(func(arg db.GetWebhooksForEventParams) bool {
-					return arg.ResourceID == testutils.TestUUID(1) && arg.Column2 == "reservation.created"
-				})).Return([]db.ClaimctlWebhook{}, nil)
-
 				// History log
 			},
 			shouldSucceed: true,
 		},
 		{
 			name:       "User already has reservation for resource",
-			userID: testutils.TestUUID(1),
+			userID:     testutils.TestUUID(1),
 			resourceID: testutils.TestUUID(1),
 			mockSetup: func() {
 				// Check maintenance status
-				mockDB.On("GetResourceMaintenanceStatus", ctx, testutils.TestUUID(1)).Return(pgtype.Bool{Bool: false, Valid: true}, nil)
+				mockDB.On("GetResourceMaintenanceStatus", ctx, testutils.TestUUID(1)).Return(pgtype.Bool{Bool: false, Valid: true}, nil).Maybe()
 				existingReservation := testutils.CreateTestReservation(testutils.TestUUID(1), testutils.TestUUID(1), testutils.TestUUID(1), "active", 1)
 				mockDB.On("FindUserReservationForResource", ctx, mock.AnythingOfType("db.FindUserReservationForResourceParams")).Return(existingReservation, nil)
 			},
-			expectedError: "user already has a reservation for this resource",
+			expectedError: "claim unavailable or quota exceeded",
 		},
 		{
 			name:       "Database error creating reservation",
-			userID: testutils.TestUUID(1),
+			userID:     testutils.TestUUID(1),
 			resourceID: testutils.TestUUID(1),
 			mockSetup: func() {
 				// Check maintenance status
-				mockDB.On("GetResourceMaintenanceStatus", ctx, testutils.TestUUID(1)).Return(pgtype.Bool{Bool: false, Valid: true}, nil)
+				mockDB.On("GetResourceMaintenanceStatus", ctx, testutils.TestUUID(1)).Return(pgtype.Bool{Bool: false, Valid: true}, nil).Maybe()
 				// No existing reservation found
-				mockDB.On("FindUserReservationForResource", ctx, mock.AnythingOfType("db.FindUserReservationForResourceParams")).Return(db.ClaimctlReservation{}, assert.AnError)
+				mockDB.On("FindUserReservationForResource", ctx, mock.AnythingOfType("db.FindUserReservationForResourceParams")).Return(db.ClaimctlReservation{}, pgx.ErrNoRows)
 				// Create reservation fails
 				mockDB.On("CreateReservation", ctx, mock.AnythingOfType("db.CreateReservationParams")).Return(db.ClaimctlReservation{}, assert.AnError)
 			},
-			expectedError: "failed to create reservation",
+			expectedError: assert.AnError.Error(),
 		},
 	}
 
@@ -143,6 +139,14 @@ func TestReservationService_CreateReservation(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			mockDB.ExpectedCalls = nil // Reset mock
 			mockDB.On("AcquireResourceLock", ctx, mock.Anything).Return(uuid.UUID{}, nil).Maybe()
+			mockDB.On("LockClaimUser", ctx, tt.userID).Return(db.ClaimctlUser{ID: tt.userID, Status: "active", Role: "user"}, nil)
+			mockDB.On("FindResourceById", ctx, tt.resourceID).Return(db.ClaimctlResource{ID: tt.resourceID, SpaceID: testutils.TestUUID(1), Name: "Test Resource"}, nil).Maybe()
+			mockDB.On("HasSpacePermission", ctx, mock.Anything).Return(true, nil)
+			mockDB.On("CountLiveClaims", ctx, tt.userID).Return(int64(0), nil)
+			mockDB.On("FindClaimCandidates", ctx).Return([]db.ClaimctlResource{{ID: tt.resourceID, SpaceID: testutils.TestUUID(1)}}, nil)
+			mockDB.On("GetQueueForResource", ctx, tt.resourceID).Return([]db.GetQueueForResourceRow{}, nil).Maybe()
+			mockDB.On("ReclaimResourceReservations", ctx, tt.resourceID).Return([]db.ClaimctlReservation{}, nil).Maybe()
+			mockDB.On("SetReservationLifetime", ctx, mock.Anything).Return(testutils.CreateTestReservation(testutils.TestUUID(1), tt.resourceID, tt.userID, "pending", 1), nil).Maybe()
 			mockHistory.ExpectedCalls = nil
 			tt.mockSetup()
 
@@ -188,23 +192,18 @@ func TestReservationService_ActivateReservation(t *testing.T) {
 			reservationID: testutils.TestUUID(1),
 			mockSetup: func() {
 				reservation := testutils.CreateTestReservation(testutils.TestUUID(1), testutils.TestUUID(1), testutils.TestUUID(1), "pending", 1)
-				mockDB.On("FindReservationById", ctx, testutils.TestUUID(1)).Return(reservation, nil).Once()
+				mockDB.On("FindReservationById", ctx, testutils.TestUUID(1)).Return(reservation, nil).Twice()
 				// No active reservation for this resource
 				mockDB.On("FindActiveReservationByResource", ctx, testutils.TestUUID(1)).Return(db.ClaimctlReservation{}, assert.AnError)
 				// Promote queue
 				mockDB.On("UpdateQueuePositions", mock.Anything, mock.Anything).Return(nil)
 				// Activate reservation
-				mockDB.On("ActivateReservation", ctx, mock.AnythingOfType("db.ActivateReservationParams")).Return(nil)
+				mockDB.On("ActivateReservation", ctx, mock.AnythingOfType("uuid.UUID")).Return(nil)
 
 				// Find Resource for Broadcast
 				mockDB.On("FindResourceById", ctx, testutils.TestUUID(1)).Return(db.ClaimctlResource{Name: "Test Resource"}, nil)
 
 				mockNotification.On("Notify", mock.Anything, testutils.TestUUID(1), "reservation_activated", mock.Anything).Return(nil)
-
-				// Mock webhooks trigger
-				mockDB.On("GetWebhooksForEvent", ctx, mock.MatchedBy(func(arg db.GetWebhooksForEventParams) bool {
-					return arg.ResourceID == testutils.TestUUID(1) && arg.Column2 == "reservation.activated"
-				})).Return([]db.ClaimctlWebhook{}, nil)
 
 				// Get updated reservation
 				updatedReservation := testutils.CreateTestReservation(testutils.TestUUID(1), testutils.TestUUID(1), testutils.TestUUID(1), "active", 1)
@@ -255,7 +254,7 @@ func TestReservationService_ActivateReservation(t *testing.T) {
 				// Promote queue
 				mockDB.On("UpdateQueuePositions", mock.Anything, mock.Anything).Return(nil)
 				// Activate reservation fails
-				mockDB.On("ActivateReservation", ctx, mock.AnythingOfType("db.ActivateReservationParams")).Return(assert.AnError)
+				mockDB.On("ActivateReservation", ctx, mock.AnythingOfType("uuid.UUID")).Return(assert.AnError)
 			},
 			expectedError: "failed to activate reservation",
 		},
@@ -313,12 +312,7 @@ func TestReservationService_CompleteReservation(t *testing.T) {
 				reservation := testutils.CreateTestReservation(testutils.TestUUID(1), testutils.TestUUID(1), testutils.TestUUID(1), "active", 0)
 				mockDB.On("FindReservationById", ctx, testutils.TestUUID(1)).Return(reservation, nil)
 				// Complete reservation
-				mockDB.On("CompleteReservation", ctx, mock.AnythingOfType("db.CompleteReservationParams")).Return(nil)
-
-				// Mock webhooks trigger
-				mockDB.On("GetWebhooksForEvent", ctx, mock.MatchedBy(func(arg db.GetWebhooksForEventParams) bool {
-					return arg.ResourceID == testutils.TestUUID(1) && arg.Column2 == "reservation.completed"
-				})).Return([]db.ClaimctlWebhook{}, nil)
+				mockDB.On("CompleteReservation", ctx, mock.AnythingOfType("uuid.UUID")).Return(nil)
 
 				mockNotification.On("Notify", mock.Anything, testutils.TestUUID(1), "reservation_completed", mock.Anything).Return(nil)
 
@@ -342,12 +336,7 @@ func TestReservationService_CompleteReservation(t *testing.T) {
 				mockDB.On("FindReservationById", ctx, testutils.TestUUID(1)).Return(activeReservation, nil).Once()
 
 				// Complete reservation
-				mockDB.On("CompleteReservation", ctx, mock.AnythingOfType("db.CompleteReservationParams")).Return(nil)
-
-				// Mock webhooks trigger for completed
-				mockDB.On("GetWebhooksForEvent", ctx, mock.MatchedBy(func(arg db.GetWebhooksForEventParams) bool {
-					return arg.ResourceID == testutils.TestUUID(1) && arg.Column2 == "reservation.completed"
-				})).Return([]db.ClaimctlWebhook{}, nil)
+				mockDB.On("CompleteReservation", ctx, mock.AnythingOfType("uuid.UUID")).Return(nil)
 
 				mockNotification.On("Notify", mock.Anything, testutils.TestUUID(1), "reservation_completed", mock.Anything).Return(nil)
 
@@ -359,7 +348,7 @@ func TestReservationService_CompleteReservation(t *testing.T) {
 				mockDB.On("GetNextInQueue", ctx, testutils.TestUUID(1)).Return(nextReservation, nil)
 
 				// Find reservation for activation (called from ActivateReservation)
-				mockDB.On("FindReservationById", ctx, testutils.TestUUID(2)).Return(nextReservation, nil).Once()
+				mockDB.On("FindReservationById", ctx, testutils.TestUUID(2)).Return(nextReservation, nil).Twice()
 
 				// No active reservation for this resource (the completed one is no longer active)
 				mockDB.On("FindActiveReservationByResource", ctx, testutils.TestUUID(1)).Return(db.ClaimctlReservation{}, assert.AnError)
@@ -368,19 +357,10 @@ func TestReservationService_CompleteReservation(t *testing.T) {
 				mockDB.On("UpdateQueuePositions", mock.Anything, mock.Anything).Return(nil)
 
 				// Activate reservation
-				mockDB.On("ActivateReservation", ctx, mock.AnythingOfType("db.ActivateReservationParams")).Return(nil)
-
-				// Mock webhooks trigger for activated
-				mockDB.On("GetWebhooksForEvent", ctx, mock.MatchedBy(func(arg db.GetWebhooksForEventParams) bool {
-					return arg.ResourceID == testutils.TestUUID(1) && arg.Column2 == "reservation.activated"
-				})).Return([]db.ClaimctlWebhook{}, nil)
+				mockDB.On("ActivateReservation", ctx, mock.AnythingOfType("uuid.UUID")).Return(nil)
 
 				mockNotification.On("Notify", mock.Anything, testutils.TestUUID(2), "reservation_activated", mock.Anything).Return(nil)
 
-				// Get updated reservation after activation
-				updatedReservation := testutils.CreateTestReservation(testutils.TestUUID(2), testutils.TestUUID(1), testutils.TestUUID(2), "active", 0)
-				updatedReservation.StartTime = pgtype.Int8{Int64: time.Now().Unix(), Valid: true}
-				mockDB.On("FindReservationById", ctx, testutils.TestUUID(2)).Return(updatedReservation, nil).Once()
 			},
 			shouldSucceed: true,
 		},
@@ -408,7 +388,7 @@ func TestReservationService_CompleteReservation(t *testing.T) {
 				reservation := testutils.CreateTestReservation(testutils.TestUUID(1), testutils.TestUUID(1), testutils.TestUUID(1), "active", 0)
 				mockDB.On("FindReservationById", ctx, testutils.TestUUID(1)).Return(reservation, nil)
 				// Complete reservation fails
-				mockDB.On("CompleteReservation", ctx, mock.AnythingOfType("db.CompleteReservationParams")).Return(assert.AnError)
+				mockDB.On("CompleteReservation", ctx, mock.AnythingOfType("uuid.UUID")).Return(assert.AnError)
 			},
 			expectedError: "failed to complete reservation",
 		},
@@ -452,7 +432,7 @@ func TestReservationService_CancelReservation(t *testing.T) {
 	tests := []struct {
 		name          string
 		reservationID uuid.UUID
-		userID uuid.UUID
+		userID        uuid.UUID
 		mockSetup     func()
 		expectedError string
 		shouldSucceed bool
@@ -460,17 +440,12 @@ func TestReservationService_CancelReservation(t *testing.T) {
 		{
 			name:          "Successful pending reservation cancellation",
 			reservationID: testutils.TestUUID(1),
-			userID: testutils.TestUUID(1),
+			userID:        testutils.TestUUID(1),
 			mockSetup: func() {
 				reservation := testutils.CreateTestReservation(testutils.TestUUID(1), testutils.TestUUID(1), testutils.TestUUID(1), "pending", 1)
 				mockDB.On("FindReservationById", ctx, testutils.TestUUID(1)).Return(reservation, nil)
 				// Cancel reservation
-				mockDB.On("CancelReservation", ctx, mock.AnythingOfType("db.CancelReservationParams")).Return(nil)
-
-				// Mock webhooks trigger
-				mockDB.On("GetWebhooksForEvent", ctx, mock.MatchedBy(func(arg db.GetWebhooksForEventParams) bool {
-					return arg.ResourceID == testutils.TestUUID(1) && arg.Column2 == "reservation.cancelled"
-				})).Return([]db.ClaimctlWebhook{}, nil)
+				mockDB.On("CancelReservation", ctx, mock.AnythingOfType("uuid.UUID")).Return(nil)
 
 				// History log
 				// Promote queue positions (for pending reservation)
@@ -486,17 +461,12 @@ func TestReservationService_CancelReservation(t *testing.T) {
 		{
 			name:          "Successful active reservation cancellation",
 			reservationID: testutils.TestUUID(1),
-			userID: testutils.TestUUID(1),
+			userID:        testutils.TestUUID(1),
 			mockSetup: func() {
 				reservation := testutils.CreateTestReservation(testutils.TestUUID(1), testutils.TestUUID(1), testutils.TestUUID(1), "active", 0)
 				mockDB.On("FindReservationById", ctx, testutils.TestUUID(1)).Return(reservation, nil)
 				// Cancel reservation
-				mockDB.On("CancelReservation", ctx, mock.AnythingOfType("db.CancelReservationParams")).Return(nil)
-
-				// Mock webhooks trigger
-				mockDB.On("GetWebhooksForEvent", ctx, mock.MatchedBy(func(arg db.GetWebhooksForEventParams) bool {
-					return arg.ResourceID == testutils.TestUUID(1) && arg.Column2 == "reservation.cancelled"
-				})).Return([]db.ClaimctlWebhook{}, nil)
+				mockDB.On("CancelReservation", ctx, mock.AnythingOfType("uuid.UUID")).Return(nil)
 
 				// History log
 				// Process queue (for active reservation)
@@ -512,7 +482,7 @@ func TestReservationService_CancelReservation(t *testing.T) {
 		{
 			name:          "Reservation not found",
 			reservationID: testutils.TestUUID(1),
-			userID: testutils.TestUUID(1),
+			userID:        testutils.TestUUID(1),
 			mockSetup: func() {
 				mockDB.On("FindReservationById", ctx, testutils.TestUUID(1)).Return(db.ClaimctlReservation{}, assert.AnError)
 			},
@@ -521,7 +491,7 @@ func TestReservationService_CancelReservation(t *testing.T) {
 		{
 			name:          "User does not own reservation",
 			reservationID: testutils.TestUUID(1),
-			userID: testutils.TestUUID(2),
+			userID:        testutils.TestUUID(2),
 			mockSetup: func() {
 				reservation := testutils.CreateTestReservation(testutils.TestUUID(1), testutils.TestUUID(1), testutils.TestUUID(1), "pending", 1)
 				mockDB.On("FindReservationById", ctx, testutils.TestUUID(1)).Return(reservation, nil)
@@ -531,7 +501,7 @@ func TestReservationService_CancelReservation(t *testing.T) {
 		{
 			name:          "Cannot cancel completed reservation",
 			reservationID: testutils.TestUUID(1),
-			userID: testutils.TestUUID(1),
+			userID:        testutils.TestUUID(1),
 			mockSetup: func() {
 				reservation := testutils.CreateTestReservation(testutils.TestUUID(1), testutils.TestUUID(1), testutils.TestUUID(1), "completed", 0)
 				mockDB.On("FindReservationById", ctx, testutils.TestUUID(1)).Return(reservation, nil)
@@ -541,12 +511,12 @@ func TestReservationService_CancelReservation(t *testing.T) {
 		{
 			name:          "Database error cancelling reservation",
 			reservationID: testutils.TestUUID(1),
-			userID: testutils.TestUUID(1),
+			userID:        testutils.TestUUID(1),
 			mockSetup: func() {
 				reservation := testutils.CreateTestReservation(testutils.TestUUID(1), testutils.TestUUID(1), testutils.TestUUID(1), "pending", 1)
 				mockDB.On("FindReservationById", ctx, testutils.TestUUID(1)).Return(reservation, nil)
 				// Cancel reservation fails
-				mockDB.On("CancelReservation", ctx, mock.AnythingOfType("db.CancelReservationParams")).Return(assert.AnError)
+				mockDB.On("CancelReservation", ctx, mock.AnythingOfType("uuid.UUID")).Return(assert.AnError)
 			},
 			expectedError: "failed to cancel reservation",
 		},
@@ -650,7 +620,7 @@ func TestReservationService_GetUserReservations(t *testing.T) {
 
 	tests := []struct {
 		name          string
-		userID uuid.UUID
+		userID        uuid.UUID
 		mockSetup     func()
 		expectedError string
 		shouldSucceed bool
@@ -717,7 +687,7 @@ func TestReservationService_ProcessQueue(t *testing.T) {
 
 	tests := []struct {
 		name          string
-		resourceID uuid.UUID
+		resourceID    uuid.UUID
 		mockSetup     func()
 		expectedError string
 		shouldSucceed bool
@@ -736,17 +706,12 @@ func TestReservationService_ProcessQueue(t *testing.T) {
 				// Promote queue
 				mockDB.On("UpdateQueuePositions", mock.Anything, mock.Anything).Return(nil)
 				// Activate reservation
-				mockDB.On("ActivateReservation", ctx, mock.AnythingOfType("db.ActivateReservationParams")).Return(nil)
+				mockDB.On("ActivateReservation", ctx, mock.AnythingOfType("uuid.UUID")).Return(nil)
 
 				// Find Resource for Broadcast
 				mockDB.On("FindResourceById", ctx, testutils.TestUUID(1)).Return(db.ClaimctlResource{Name: "Test Resource"}, nil)
 
 				mockNotification.On("Notify", mock.Anything, testutils.TestUUID(1), "reservation_activated", mock.Anything).Return(nil)
-
-				// Mock webhooks trigger
-				mockDB.On("GetWebhooksForEvent", ctx, mock.MatchedBy(func(arg db.GetWebhooksForEventParams) bool {
-					return arg.ResourceID == testutils.TestUUID(1) && arg.Column2 == "reservation.activated"
-				})).Return([]db.ClaimctlWebhook{}, nil)
 
 				// Get updated reservation
 				updatedReservation := testutils.CreateTestReservation(testutils.TestUUID(1), testutils.TestUUID(1), testutils.TestUUID(1), "active", 1)
@@ -811,8 +776,8 @@ func TestReservationService_GetUserQueuePosition(t *testing.T) {
 
 	tests := []struct {
 		name          string
-		userID uuid.UUID
-		resourceID uuid.UUID
+		userID        uuid.UUID
+		resourceID    uuid.UUID
 		mockSetup     func()
 		expectedError string
 		shouldSucceed bool
@@ -820,7 +785,7 @@ func TestReservationService_GetUserQueuePosition(t *testing.T) {
 	}{
 		{
 			name:       "Successfully get queue position",
-			userID: testutils.TestUUID(1),
+			userID:     testutils.TestUUID(1),
 			resourceID: testutils.TestUUID(1),
 			mockSetup: func() {
 				position := pgtype.Int4{Int32: 3, Valid: true}
@@ -831,7 +796,7 @@ func TestReservationService_GetUserQueuePosition(t *testing.T) {
 		},
 		{
 			name:       "User not in queue",
-			userID: testutils.TestUUID(1),
+			userID:     testutils.TestUUID(1),
 			resourceID: testutils.TestUUID(1),
 			mockSetup: func() {
 				mockDB.On("GetUserQueuePosition", ctx, mock.AnythingOfType("db.GetUserQueuePositionParams")).Return(pgtype.Int4{}, assert.AnError)
@@ -862,12 +827,7 @@ func TestReservationService_GetUserQueuePosition(t *testing.T) {
 	}
 }
 
-// TestCreateReservation_NotifyContextDetached guards against regressions
-// where Notify is spawned with the raw request context: Fiber recycles it
-// once the handler returns, racing the goroutine's DB reads. The mock
-// expectations elsewhere use mock.Anything for ctx, which would not catch
-// such a regression -- this test asserts identity explicitly.
-func TestCreateReservation_NotifyContextDetached(t *testing.T) {
+func TestCreateReservation_NotifyContextBounded(t *testing.T) {
 	ctx := testutils.TestContext()
 	mockDB := &testutils.MockQuerier{}
 	mockHistory := &testutils.MockReservationHistoryService{}
@@ -878,12 +838,17 @@ func TestCreateReservation_NotifyContextDetached(t *testing.T) {
 	service := NewReservationService(mockDB, mockHistory, webhookSvc, mockRealtime, mockNotification)
 
 	mockDB.On("AcquireResourceLock", ctx, testutils.TestUUID(1)).Return(uuid.UUID{}, nil)
-	mockDB.On("GetResourceMaintenanceStatus", ctx, testutils.TestUUID(1)).Return(pgtype.Bool{Bool: false, Valid: true}, nil)
-	mockDB.On("FindUserReservationForResource", ctx, mock.AnythingOfType("db.FindUserReservationForResourceParams")).Return(db.ClaimctlReservation{}, assert.AnError)
+	mockDB.On("CountLiveClaims", ctx, testutils.TestUUID(1)).Return(int64(0), nil)
+	mockDB.On("FindClaimCandidates", ctx).Return([]db.ClaimctlResource{{ID: testutils.TestUUID(1), SpaceID: testutils.TestUUID(1)}}, nil)
+	mockDB.On("GetQueueForResource", ctx, testutils.TestUUID(1)).Return([]db.GetQueueForResourceRow{}, nil)
+	mockDB.On("ReclaimResourceReservations", ctx, testutils.TestUUID(1)).Return([]db.ClaimctlReservation{}, nil)
+	mockDB.On("SetReservationLifetime", ctx, mock.Anything).Return(testutils.CreateTestReservation(testutils.TestUUID(1), testutils.TestUUID(1), testutils.TestUUID(1), "pending", 1), nil)
+	mockDB.On("FindUserReservationForResource", ctx, mock.AnythingOfType("db.FindUserReservationForResourceParams")).Return(db.ClaimctlReservation{}, pgx.ErrNoRows)
 	reservation := testutils.CreateTestReservation(testutils.TestUUID(1), testutils.TestUUID(1), testutils.TestUUID(1), "pending", 1)
 	mockDB.On("CreateReservation", ctx, mock.AnythingOfType("db.CreateReservationParams")).Return(reservation, nil)
-	mockDB.On("FindResourceById", ctx, testutils.TestUUID(1)).Return(db.ClaimctlResource{Name: "Test Resource"}, nil)
-	mockDB.On("GetWebhooksForEvent", ctx, mock.Anything).Return([]db.ClaimctlWebhook{}, nil)
+	mockDB.On("FindResourceById", ctx, testutils.TestUUID(1)).Return(db.ClaimctlResource{ID: testutils.TestUUID(1), Name: "Test Resource", SpaceID: testutils.TestUUID(1)}, nil)
+	mockDB.On("LockClaimUser", ctx, testutils.TestUUID(1)).Return(db.ClaimctlUser{ID: testutils.TestUUID(1), Status: "active", Role: "user"}, nil)
+	mockDB.On("HasSpacePermission", ctx, mock.Anything).Return(true, nil)
 
 	notifyCtx := make(chan context.Context, 1)
 	mockNotification.On("Notify", mock.Anything, testutils.TestUUID(1), "reservation_created", mock.Anything).
@@ -898,7 +863,7 @@ func TestCreateReservation_NotifyContextDetached(t *testing.T) {
 	select {
 	case got := <-notifyCtx:
 		assert.NotEqual(t, ctx, got, "Notify must not receive the raw request context")
-		assert.NoError(t, got.Err(), "detached context must never be canceled")
+		assert.ErrorIs(t, got.Err(), context.Canceled, "notification context ends before returning the request")
 	case <-time.After(2 * time.Second):
 		t.Fatal("Notify was not called")
 	}

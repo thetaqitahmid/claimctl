@@ -31,6 +31,7 @@ type ResourceService interface {
 	GetResource(ctx context.Context, id uuid.UUID, userID uuid.UUID, isAdmin bool) (*db.ClaimctlResource, error)
 	GetResourceWithStatus(ctx context.Context, id uuid.UUID, userID uuid.UUID, isAdmin bool) (*ResourceWithStatus, error)
 	GetAllResources(ctx context.Context, labelFilter utils.FilterExpr) (*[]db.ClaimctlResource, error)
+	GetAllResourcesForUser(ctx context.Context, userID uuid.UUID, isAdmin bool, labelFilter utils.FilterExpr) (*[]db.ClaimctlResource, error)
 	GetAllResourcesWithStatus(ctx context.Context, labelFilter utils.FilterExpr) (*[]ResourceWithStatus, error)
 	GetAllResourcesWithStatusForUser(ctx context.Context, userID uuid.UUID, isAdmin bool, labelFilter utils.FilterExpr) (*[]ResourceWithStatus, error)
 	UpdateResource(ctx context.Context, req UpdateResourceRequest) (*db.ClaimctlResource, error)
@@ -98,27 +99,21 @@ func (s *resourceService) CreateResource(ctx context.Context, req CreateResource
 }
 
 func (s *resourceService) GetResource(ctx context.Context, id uuid.UUID, userID uuid.UUID, isAdmin bool) (*db.ClaimctlResource, error) {
-	if !isAdmin {
-		// Check if user has access to the space this resource belongs to
-		resource, err := s.db.FindResourceById(ctx, id)
-		if err != nil {
-			return nil, fmt.Errorf("resource not found")
-		}
-		hasPerm, err := s.db.HasSpacePermission(ctx, db.HasSpacePermissionParams{
-			ID:     resource.SpaceID,
-			UserID: pgtype.UUID{Bytes: userID, Valid: true},
-		})
-		if err != nil || !hasPerm {
-			return nil, fmt.Errorf("access denied")
-		}
-		return &resource, nil
-	}
+	return AuthorizeResource(ctx, s.db, id, userID, isAdmin)
+}
 
-	resource, err := s.db.FindResourceById(ctx, id)
+func (s *resourceService) GetAllResourcesForUser(ctx context.Context, userID uuid.UUID, isAdmin bool, labelFilter utils.FilterExpr) (*[]db.ClaimctlResource, error) {
+	resources, err := s.GetAllResources(ctx, labelFilter)
 	if err != nil {
-		return nil, fmt.Errorf("resource with ID %s not found", id)
+		return nil, err
 	}
-	return &resource, nil
+	visible := make([]db.ClaimctlResource, 0, len(*resources))
+	for _, r := range *resources {
+		if AuthorizeSpace(ctx, s.db, r.SpaceID, userID, isAdmin) == nil {
+			visible = append(visible, r)
+		}
+	}
+	return &visible, nil
 }
 
 func (s *resourceService) GetAllResources(ctx context.Context, labelFilter utils.FilterExpr) (*[]db.ClaimctlResource, error) {
@@ -146,19 +141,8 @@ func (s *resourceService) GetAllResources(ctx context.Context, labelFilter utils
 }
 
 func (s *resourceService) GetResourceWithStatus(ctx context.Context, id uuid.UUID, userID uuid.UUID, isAdmin bool) (*ResourceWithStatus, error) {
-	if !isAdmin {
-		// Check space permission
-		resource, err := s.db.FindResourceById(ctx, id)
-		if err != nil {
-			return nil, fmt.Errorf("resource not found")
-		}
-		hasPerm, err := s.db.HasSpacePermission(ctx, db.HasSpacePermissionParams{
-			ID:     resource.SpaceID,
-			UserID: pgtype.UUID{Bytes: userID, Valid: true},
-		})
-		if err != nil || !hasPerm {
-			return nil, fmt.Errorf("access denied")
-		}
+	if _, err := AuthorizeResource(ctx, s.db, id, userID, isAdmin); err != nil {
+		return nil, err
 	}
 
 	resourceStatus, err := s.db.GetResourceReservationStatus(ctx, id)
@@ -242,13 +226,31 @@ func (s *resourceService) GetAllResourcesWithStatus(ctx context.Context, labelFi
 
 func (s *resourceService) GetAllResourcesWithStatusForUser(ctx context.Context, userID uuid.UUID, isAdmin bool, labelFilter utils.FilterExpr) (*[]ResourceWithStatus, error) {
 	if isAdmin {
-		return s.GetAllResourcesWithStatus(ctx, labelFilter)
+		resources, err := s.db.GetAllResourcesWithReservationStatus(ctx)
+		if err != nil {
+			return nil, err
+		}
+		filtered := make([]db.GetAllResourcesWithReservationStatusRow, 0, len(resources))
+		for _, r := range resources {
+			if AuthorizeSpace(ctx, s.db, r.SpaceID, userID, isAdmin) == nil {
+				filtered = append(filtered, r)
+			}
+		}
+		return s.enrichResourcesWithHealth(ctx, filtered, labelFilter)
 	}
 
 	resourcesStatus, err := s.db.GetAllResourcesWithReservationStatusForUser(ctx, pgtype.UUID{Bytes: userID, Valid: true})
 	if err != nil {
 		return nil, fmt.Errorf("failed to retrieve resources with status for user: %w", err)
 	}
+
+	visible := resourcesStatus[:0]
+	for _, r := range resourcesStatus {
+		if AuthorizeSpace(ctx, s.db, r.SpaceID, userID, isAdmin) == nil {
+			visible = append(visible, r)
+		}
+	}
+	resourcesStatus = visible
 
 	// Filter by labels first to avoid unnecessary enrichment work
 	var filteredStatus []db.GetAllResourcesWithReservationStatusForUserRow
@@ -483,6 +485,9 @@ func (s *resourceService) DeleteResource(ctx context.Context, id uuid.UUID) erro
 }
 
 func (s *resourceService) SetMaintenanceMode(ctx context.Context, resourceID uuid.UUID, enabled bool, userID uuid.UUID, reason string) (*db.ClaimctlResource, error) {
+	if err := AuthorizeRequestResource(ctx, s.db, resourceID, true); err != nil {
+		return nil, err
+	}
 	// Get current resource to check current maintenance state
 	currentResource, err := s.db.FindResourceById(ctx, resourceID)
 	if err != nil {
@@ -539,6 +544,9 @@ func (s *resourceService) SetMaintenanceMode(ctx context.Context, resourceID uui
 }
 
 func (s *resourceService) GetMaintenanceHistory(ctx context.Context, resourceID uuid.UUID) (*[]db.GetMaintenanceHistoryRow, error) {
+	if err := AuthorizeRequestResource(ctx, s.db, resourceID, false); err != nil {
+		return nil, err
+	}
 	history, err := s.db.GetMaintenanceHistory(ctx, resourceID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get maintenance history for resource %d: %w", resourceID, err)

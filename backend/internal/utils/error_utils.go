@@ -29,7 +29,10 @@ func GetUUIDParam(c *fiber.Ctx, name string) (uuid.UUID, error) {
 	param := c.Params(name)
 	id, err := uuid.Parse(param)
 	if err != nil {
-		return uuid.Nil, SendError(c, fiber.StatusBadRequest, "Invalid ID format. Must be a valid UUID.", err)
+		if responseErr := SendError(c, fiber.StatusBadRequest, "Invalid ID format. Must be a valid UUID.", err); responseErr != nil {
+			return uuid.Nil, responseErr
+		}
+		return uuid.Nil, err
 	}
 	return id, nil
 }

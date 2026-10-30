@@ -29,21 +29,22 @@ type LoginRequest struct {
 
 // JWT Claims structure
 type Claims struct {
-	UserID uuid.UUID  `json:"id"`
-	Email  string `json:"email"`
-	Name   string `json:"name"`
+	UserID uuid.UUID `json:"id"`
+	Email  string    `json:"email"`
+	Name   string    `json:"name"`
 
-	Role   string `json:"role"`
-	Status string `json:"status"`
+	Role              string `json:"role"`
+	Status            string `json:"status"`
+	CredentialVersion string `json:"credential_version"`
 	jwt.RegisteredClaims
 }
 
 type UserHandler struct {
-	userService          services.UserService
-	settingsService      *services.SettingsService
-	privateKey           *rsa.PrivateKey
-	auditService         services.AuditService
-	refreshTokenService  services.RefreshTokenService
+	userService         services.UserService
+	settingsService     *services.SettingsService
+	privateKey          *rsa.PrivateKey
+	auditService        services.AuditService
+	refreshTokenService services.RefreshTokenService
 }
 
 func NewUserHandler(userService services.UserService, settingsService *services.SettingsService, privateKey *rsa.PrivateKey, auditService services.AuditService, refreshTokenService services.RefreshTokenService) *UserHandler {
@@ -57,14 +58,15 @@ func NewUserHandler(userService services.UserService, settingsService *services.
 }
 
 // Generate JWT token
-func (h *UserHandler) generateJWT(userID uuid.UUID, email string, name string, role string, status string) (string, error) {
+func (h *UserHandler) generateJWT(userID uuid.UUID, email string, name string, role string, status string, passwordHash string) (string, error) {
 	claims := Claims{
 		UserID: userID,
 		Email:  email,
 		Name:   name,
 
-		Role:   role,
-		Status: status,
+		Role:              role,
+		Status:            status,
+		CredentialVersion: services.CredentialVersion(passwordHash),
 		RegisteredClaims: jwt.RegisteredClaims{
 			ExpiresAt: jwt.NewNumericDate(time.Now().Add(15 * time.Minute)),
 			IssuedAt:  jwt.NewNumericDate(time.Now()),
@@ -128,7 +130,7 @@ func (h *UserHandler) Login(c *fiber.Ctx) error {
 	}
 
 	loginRequest := services.LoginRequest{
-		Email: req.Email,
+		Email:    req.Email,
 		Password: req.Password,
 	}
 
@@ -140,12 +142,12 @@ func (h *UserHandler) Login(c *fiber.Ctx) error {
 		return utils.SendError(c, fiber.StatusUnauthorized, "Invalid credentials", err)
 	}
 
-	token, err := h.generateJWT(user.ID, user.Email, user.Name, user.Role, user.Status)
+	token, err := h.generateJWT(user.ID, user.Email, user.Name, user.Role, user.Status, user.Password)
 	if err != nil {
 		return utils.SendError(c, fiber.StatusInternalServerError, "Failed to generate token", err)
 	}
 
-	refreshToken, err := h.refreshTokenService.Issue(c.Context(), user.ID)
+	refreshToken, err := h.refreshTokenService.Issue(c.UserContext(), user.ID, services.CredentialVersion(user.Password))
 	if err != nil {
 		return utils.SendError(c, fiber.StatusInternalServerError, "Failed to issue refresh token", err)
 	}
@@ -154,11 +156,11 @@ func (h *UserHandler) Login(c *fiber.Ctx) error {
 
 	return c.JSON(fiber.Map{
 		"user": fiber.Map{
-			"id":           user.ID,
-			"email":        user.Email,
-			"name":         user.Name,
-			"role":         user.Role,
-			"status":       user.Status,
+			"id":            user.ID,
+			"email":         user.Email,
+			"name":          user.Name,
+			"role":          user.Role,
+			"status":        user.Status,
 			"auth_provider": user.AuthProvider,
 		},
 		"message": "Login successful",
@@ -197,9 +199,9 @@ func (h *UserHandler) GetMe(c *fiber.Ctx) error {
 	}
 	return c.JSON(fiber.Map{
 		"user": fiber.Map{
-			"id":            user.ID,
-			"email":         user.Email,
-			"name":          user.Name,
+			"id":    user.ID,
+			"email": user.Email,
+			"name":  user.Name,
 
 			"role":               user.Role,
 			"status":             user.Status,
@@ -262,7 +264,7 @@ func (h *UserHandler) CreateUser(c *fiber.Ctx) error {
 
 	actor, _ := GetUserFromContext(c)
 	if actor != nil {
-		h.auditService.Log(c.Context(), actor.ID, "CREATE", "USER", createdUser.ID.String(), user, c.IP())
+		h.auditService.Log(c.Context(), actor.ID, "CREATE", "USER", createdUser.ID.String(), createdUser.PublicUserResponse, c.IP())
 	}
 
 	return c.Status(fiber.StatusCreated).JSON(createdUser)
@@ -357,14 +359,9 @@ func (h *UserHandler) UpdateUser(c *fiber.Ctx) error {
 		return utils.SendError(c, fiber.StatusInternalServerError, "Failed to update user", err)
 	}
 
-	if (user.Status != nil && *user.Status == "disabled") ||
-		(user.Password != nil && len(*user.Password) > 0) {
-		_ = h.refreshTokenService.RevokeAllByUser(c.Context(), idValue)
-	}
-
 	actor, _ := GetUserFromContext(c)
 	if actor != nil {
-		h.auditService.Log(c.Context(), actor.ID, "UPDATE", "USER", idValue.String(), user, c.IP())
+		h.auditService.Log(c.Context(), actor.ID, "UPDATE", "USER", idValue.String(), fiber.Map{"email": user.Email, "name": user.Name, "role": user.Role, "status": user.Status}, c.IP())
 	}
 
 	return nil
@@ -404,22 +401,12 @@ func (h *UserHandler) RefreshToken(c *fiber.Ctx) error {
 		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"error": "Missing refresh token"})
 	}
 
-	newRaw, userID, err := h.refreshTokenService.Rotate(c.Context(), raw)
-	if err != nil {
+	newRaw, user, err := h.refreshTokenService.Rotate(c.UserContext(), raw)
+	if err != nil || user == nil || user.Status != "active" {
 		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"error": "Invalid or expired refresh token"})
 	}
 
-	user, err := h.userService.GetUser(c.Context(), "", userID)
-	if err != nil {
-		return utils.SendError(c, fiber.StatusInternalServerError, "Failed to fetch user", err)
-	}
-
-	if user.Status == "disabled" {
-		_ = h.refreshTokenService.RevokeAllByUser(c.Context(), userID)
-		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"error": "Account is disabled"})
-	}
-
-	token, err := h.generateJWT(user.ID, user.Email, user.Name, user.Role, user.Status)
+	token, err := h.generateJWT(user.ID, user.Email, user.Name, user.Role, user.Status, user.Password)
 	if err != nil {
 		return utils.SendError(c, fiber.StatusInternalServerError, "Failed to generate token", err)
 	}
@@ -581,12 +568,12 @@ func (h *UserHandler) CallbackOIDC(c *fiber.Ctx) error {
 		return utils.SendError(c, fiber.StatusInternalServerError, "Failed to login/sync OIDC user", err)
 	}
 
-	token, err := h.generateJWT(user.ID, user.Email, user.Name, user.Role, user.Status)
+	token, err := h.generateJWT(user.ID, user.Email, user.Name, user.Role, user.Status, user.Password)
 	if err != nil {
 		return utils.SendError(c, fiber.StatusInternalServerError, "Failed to generate token", err)
 	}
 
-	refreshToken, err := h.refreshTokenService.Issue(c.Context(), user.ID)
+	refreshToken, err := h.refreshTokenService.Issue(c.UserContext(), user.ID, services.CredentialVersion(user.Password))
 	if err != nil {
 		return utils.SendError(c, fiber.StatusInternalServerError, "Failed to issue refresh token", err)
 	}
@@ -608,8 +595,8 @@ func (h *UserHandler) UpdateChannelConfig(c *fiber.Ctx) error {
 	userID := user.ID
 
 	var payload struct {
-		SlackDestination string `json:"slack_destination"`
-		TeamsWebhookUrl  string `json:"teams_webhook_url"`
+		SlackDestination  string `json:"slack_destination"`
+		TeamsWebhookUrl   string `json:"teams_webhook_url"`
 		NotificationEmail string `json:"notification_email"`
 	}
 
@@ -717,8 +704,6 @@ func (h *UserHandler) HandleChangePassword(c *fiber.Ctx) error {
 		}
 		return utils.SendError(c, fiber.StatusBadRequest, err.Error(), err)
 	}
-
-	_ = h.refreshTokenService.RevokeAllByUser(c.Context(), user.ID)
 
 	expired := time.Now().Add(-1 * time.Hour)
 	secure := utils.GetEnvAsBool("COOKIE_SECURE", true)

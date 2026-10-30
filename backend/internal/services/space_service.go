@@ -55,20 +55,8 @@ func (s *spaceService) CreateSpace(ctx context.Context, name, description string
 }
 
 func (s *spaceService) GetSpace(ctx context.Context, id uuid.UUID, userID uuid.UUID, isAdmin bool) (*db.ClaimctlSpace, error) {
-	if isAdmin {
-		space, err := s.db.GetSpace(ctx, id)
-		if err != nil {
-			return nil, fmt.Errorf("space not found: %w", err)
-		}
-		return &space, nil
-	}
-
-	hasPerm, err := s.db.HasSpacePermission(ctx, db.HasSpacePermissionParams{
-		ID:     id,
-		UserID: pgtype.UUID{Bytes: userID, Valid: true},
-	})
-	if err != nil || !hasPerm {
-		return nil, fmt.Errorf("access denied or space not found")
+	if err := AuthorizeSpace(ctx, s.db, id, userID, isAdmin); err != nil {
+		return nil, err
 	}
 
 	space, err := s.db.GetSpace(ctx, id)
@@ -87,13 +75,24 @@ func (s *spaceService) GetAllSpaces(ctx context.Context) ([]db.ClaimctlSpace, er
 }
 
 func (s *spaceService) GetAllSpacesForUser(ctx context.Context, userID uuid.UUID, isAdmin bool) ([]db.ClaimctlSpace, error) {
+	var spaces []db.ClaimctlSpace
+	var err error
 	if isAdmin {
-		return s.GetAllSpaces(ctx)
+		spaces, err = s.GetAllSpaces(ctx)
+	} else {
+		spaces, err = s.db.ListSpacesForUser(ctx, pgtype.UUID{Bytes: userID, Valid: true})
 	}
-
-	spaces, err := s.db.ListSpacesForUser(ctx, pgtype.UUID{Bytes: userID, Valid: true})
 	if err != nil {
 		return nil, fmt.Errorf("failed to list spaces for user: %w", err)
+	}
+	if auth, ok := AuthorizationFromContext(ctx); ok {
+		visible := make([]db.ClaimctlSpace, 0, len(spaces))
+		for _, space := range spaces {
+			if auth.AllowsSpace(space.ID) {
+				visible = append(visible, space)
+			}
+		}
+		spaces = visible
 	}
 	return spaces, nil
 }

@@ -30,7 +30,7 @@ var listResourcesCmd = &cobra.Command{
 	Use:   "list",
 	Short: "List all resources",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		client, err := api.NewClient(viper.GetString("url"), viper.GetString("token"), viper.GetBool("netrc"))
+		client, err := newClient(cmd)
 		if err != nil {
 			return fmt.Errorf("error creating client: %w", err)
 		}
@@ -40,7 +40,7 @@ var listResourcesCmd = &cobra.Command{
 			return fmt.Errorf("error fetching resources: %w", err)
 		}
 
-		var filtered []api.Resource
+		filtered := make([]api.Resource, 0, len(resources))
 		for _, r := range resources {
 			// Filter by Type
 			if filterType != "" && !strings.EqualFold(r.Type, filterType) {
@@ -104,7 +104,7 @@ Use --file for bulk creation from a JSON file:
     }
   ]`,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		client, err := api.NewClient(viper.GetString("url"), viper.GetString("token"), viper.GetBool("netrc"))
+		client, err := newClient(cmd)
 		if err != nil {
 			return fmt.Errorf("error creating client: %w", err)
 		}
@@ -192,7 +192,7 @@ var deleteResourceCmd = &cobra.Command{
 	Short: "Delete a resource",
 	Args:  cobra.MaximumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		client, err := api.NewClient(viper.GetString("url"), viper.GetString("token"), viper.GetBool("netrc"))
+		client, err := newClient(cmd)
 		if err != nil {
 			return fmt.Errorf("error creating client: %w", err)
 		}
@@ -232,7 +232,7 @@ Example:
 `,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		client, err := api.NewClient(viper.GetString("url"), viper.GetString("token"), viper.GetBool("netrc"))
+		client, err := newClient(cmd)
 		if err != nil {
 			return fmt.Errorf("error creating client: %w", err)
 		}
@@ -285,7 +285,7 @@ var resourceHistoryCmd = &cobra.Command{
 	Short: "View reservation history for a resource",
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		client, err := api.NewClient(viper.GetString("url"), viper.GetString("token"), viper.GetBool("netrc"))
+		client, err := newClient(cmd)
 		if err != nil {
 			return fmt.Errorf("error creating client: %w", err)
 		}
@@ -296,6 +296,9 @@ var resourceHistoryCmd = &cobra.Command{
 		}
 
 		if len(history) == 0 {
+			if viper.GetBool("json") {
+				return outputJSON(cmd, []any{})
+			}
 			fmt.Println("No history found for this resource.")
 			return nil
 		}
@@ -336,7 +339,7 @@ var maintenanceEnableCmd = &cobra.Command{
 	Short: "Put a resource into maintenance mode",
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		client, err := api.NewClient(viper.GetString("url"), viper.GetString("token"), viper.GetBool("netrc"))
+		client, err := newClient(cmd)
 		if err != nil {
 			return fmt.Errorf("error creating client: %w", err)
 		}
@@ -357,7 +360,7 @@ var maintenanceDisableCmd = &cobra.Command{
 	Short: "Take a resource out of maintenance mode",
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		client, err := api.NewClient(viper.GetString("url"), viper.GetString("token"), viper.GetBool("netrc"))
+		client, err := newClient(cmd)
 		if err != nil {
 			return fmt.Errorf("error creating client: %w", err)
 		}
@@ -378,7 +381,7 @@ var maintenanceHistoryCmd = &cobra.Command{
 	Short: "View maintenance history for a resource",
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		client, err := api.NewClient(viper.GetString("url"), viper.GetString("token"), viper.GetBool("netrc"))
+		client, err := newClient(cmd)
 		if err != nil {
 			return fmt.Errorf("error creating client: %w", err)
 		}
@@ -389,6 +392,9 @@ var maintenanceHistoryCmd = &cobra.Command{
 		}
 
 		if len(history) == 0 {
+			if viper.GetBool("json") {
+				return outputJSON(cmd, []any{})
+			}
 			fmt.Println("No maintenance history found.")
 			return nil
 		}

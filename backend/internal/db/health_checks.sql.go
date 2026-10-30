@@ -196,6 +196,8 @@ LEFT JOIN claimctl.resource_health_status s ON c.resource_id = s.resource_id
 WHERE c.enabled = true
 GROUP BY c.resource_id, c.interval_seconds
 HAVING COALESCE(MAX(s.checked_at), 0) + c.interval_seconds <= EXTRACT(EPOCH FROM CURRENT_TIMESTAMP)::BIGINT
+ORDER BY COALESCE(MAX(s.checked_at), 0), c.resource_id
+LIMIT 1000
 `
 
 type GetResourcesDueForCheckRow struct {

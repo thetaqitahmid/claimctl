@@ -7,6 +7,16 @@ RETURNING *;
 SELECT * FROM claimctl.refresh_tokens
 WHERE token_hash = $1;
 
+-- name: GetRefreshTokenByHashForUpdate :one
+SELECT * FROM claimctl.refresh_tokens
+WHERE token_hash = $1
+FOR UPDATE;
+
+-- name: RevokeRefreshToken :exec
+UPDATE claimctl.refresh_tokens
+SET revoked = TRUE
+WHERE token_hash = $1;
+
 -- name: RevokeRefreshTokenFamily :exec
 UPDATE claimctl.refresh_tokens
 SET revoked = TRUE
@@ -22,5 +32,10 @@ SET revoked = TRUE
 WHERE user_id = $1 AND revoked = FALSE;
 
 -- name: DeleteExpiredRefreshTokens :exec
-DELETE FROM claimctl.refresh_tokens
-WHERE expires_at < NOW();
+DELETE FROM claimctl.refresh_tokens AS expired
+WHERE expired.expires_at < NOW()
+  AND NOT EXISTS (
+    SELECT 1 FROM claimctl.refresh_tokens AS family
+    WHERE family.family_id = expired.family_id
+      AND family.expires_at >= NOW()
+  );

@@ -8,6 +8,7 @@ import (
 
 	"github.com/gofiber/fiber/v2"
 
+	"github.com/thetaqitahmid/claimctl/internal/db"
 	"github.com/thetaqitahmid/claimctl/internal/services"
 	"github.com/thetaqitahmid/claimctl/internal/utils"
 )
@@ -33,7 +34,9 @@ func NewReservationHandler(reservationService services.ReservationService) *Rese
 // @Router /reservations [post]
 func (h *ReservationHandler) CreateReservation(c *fiber.Ctx) error {
 	type CreateReservationRequest struct {
-		ResourceID uuid.UUID `json:"resourceId"`
+		ResourceID    uuid.UUID `json:"resourceId"`
+		Duration      *string   `json:"duration"`
+		LeaseDuration *string   `json:"leaseDuration"`
 	}
 
 	var req CreateReservationRequest
@@ -51,9 +54,14 @@ func (h *ReservationHandler) CreateReservation(c *fiber.Ctx) error {
 	}
 	userID := user.ID
 
-	reservation, err := h.reservationService.CreateReservation(c.Context(), userID, req.ResourceID, nil)
+	var reservation *db.ClaimctlReservation
+	if service, ok := h.reservationService.(services.ClaimService); ok {
+		reservation, err = service.Claim(c.UserContext(), userID, services.ClaimRequest{ResourceID: req.ResourceID, Duration: req.Duration, LeaseDuration: req.LeaseDuration}, c.Get("Idempotency-Key"))
+	} else {
+		reservation, err = h.reservationService.CreateReservation(c.UserContext(), userID, req.ResourceID, req.Duration)
+	}
 	if err != nil {
-		return utils.SendError(c, fiber.StatusBadRequest, "Failed to create reservation", err)
+		return sendClaimError(c, err)
 	}
 
 	return c.Status(fiber.StatusCreated).JSON(reservation)
@@ -72,8 +80,9 @@ func (h *ReservationHandler) CreateReservation(c *fiber.Ctx) error {
 // @Router /reservations/timed [post]
 func (h *ReservationHandler) CreateTimedReservation(c *fiber.Ctx) error {
 	type CreateTimedReservationRequest struct {
-		ResourceID uuid.UUID  `json:"resourceId"`
-		Duration   string `json:"duration"` // e.g. "1h", "30m"
+		ResourceID    uuid.UUID `json:"resourceId"`
+		Duration      string    `json:"duration"`
+		LeaseDuration *string   `json:"leaseDuration"`
 	}
 
 	var req CreateTimedReservationRequest
@@ -91,9 +100,14 @@ func (h *ReservationHandler) CreateTimedReservation(c *fiber.Ctx) error {
 	}
 	userID := user.ID
 
-	reservation, err := h.reservationService.CreateReservation(c.Context(), userID, req.ResourceID, &req.Duration)
+	var reservation *db.ClaimctlReservation
+	if service, ok := h.reservationService.(services.ClaimService); ok {
+		reservation, err = service.Claim(c.UserContext(), userID, services.ClaimRequest{ResourceID: req.ResourceID, Duration: &req.Duration, LeaseDuration: req.LeaseDuration}, c.Get("Idempotency-Key"))
+	} else {
+		reservation, err = h.reservationService.CreateReservation(c.UserContext(), userID, req.ResourceID, &req.Duration)
+	}
 	if err != nil {
-		return utils.SendError(c, fiber.StatusBadRequest, "Failed to create timed reservation", err)
+		return sendClaimError(c, err)
 	}
 
 	return c.Status(fiber.StatusCreated).JSON(reservation)
@@ -115,7 +129,7 @@ func (h *ReservationHandler) ActivateReservation(c *fiber.Ctx) error {
 		return nil
 	}
 
-	reservation, err := h.reservationService.ActivateReservation(c.Context(), reservationID)
+	reservation, err := h.reservationService.ActivateReservation(c.UserContext(), reservationID)
 	if err != nil {
 		return utils.SendError(c, fiber.StatusBadRequest, "Failed to activate reservation", err)
 	}
@@ -167,7 +181,7 @@ func (h *ReservationHandler) CompleteReservation(c *fiber.Ctx) error {
 		})
 	}
 
-	err = h.reservationService.CompleteReservation(c.Context(), reservationID)
+	err = h.reservationService.CompleteReservation(c.UserContext(), reservationID)
 	if err != nil {
 		// Use err.Error() to return the specific service error (e.g. status mismatch)
 		return utils.SendError(c, fiber.StatusBadRequest, err.Error(), err)
@@ -204,7 +218,7 @@ func (h *ReservationHandler) CancelReservation(c *fiber.Ctx) error {
 	}
 	userID := user.ID
 
-	err = h.reservationService.CancelReservation(c.Context(), reservationID, userID)
+	err = h.reservationService.CancelReservation(c.UserContext(), reservationID, userID)
 	if err != nil {
 		return utils.SendError(c, fiber.StatusBadRequest, err.Error(), err)
 	}
@@ -370,7 +384,7 @@ func (h *ReservationHandler) ProcessQueue(c *fiber.Ctx) error {
 		return nil
 	}
 
-	err = h.reservationService.ProcessQueue(c.Context(), resourceID)
+	err = h.reservationService.ProcessQueue(c.UserContext(), resourceID)
 	if err != nil {
 		return utils.SendError(c, fiber.StatusInternalServerError, "Failed to process queue", err)
 	}

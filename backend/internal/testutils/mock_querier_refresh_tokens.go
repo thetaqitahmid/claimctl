@@ -17,6 +17,20 @@ func (m *MockQuerier) GetRefreshTokenByHash(ctx context.Context, tokenHash strin
 	return args.Get(0).(db.ClaimctlRefreshToken), args.Error(1)
 }
 
+func (m *MockQuerier) GetRefreshTokenByHashForUpdate(ctx context.Context, tokenHash string) (db.ClaimctlRefreshToken, error) {
+	args := m.Called(ctx, tokenHash)
+	return args.Get(0).(db.ClaimctlRefreshToken), args.Error(1)
+}
+
+func (m *MockQuerier) RevokeRefreshToken(ctx context.Context, tokenHash string) error {
+	return m.Called(ctx, tokenHash).Error(0)
+}
+
+func (m *MockQuerier) FindUserByIdForUpdate(ctx context.Context, id uuid.UUID) (db.ClaimctlUser, error) {
+	args := m.Called(ctx, id)
+	return args.Get(0).(db.ClaimctlUser), args.Error(1)
+}
+
 func (m *MockQuerier) RevokeRefreshTokenFamily(ctx context.Context, familyID uuid.UUID) error {
 	args := m.Called(ctx, familyID)
 	return args.Error(0)

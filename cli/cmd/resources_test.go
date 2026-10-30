@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/spf13/pflag"
 	"github.com/spf13/viper"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -115,6 +116,8 @@ func TestResourceCommandFlagDefaults(t *testing.T) {
 }
 
 func TestResourceCommandFilterLogic(t *testing.T) {
+	previousType, previousLabel := filterType, filterLabelExpr
+	t.Cleanup(func() { filterType, filterLabelExpr = previousType, previousLabel })
 	// Test the filter logic used in listResourcesCmd
 	// We can't easily test the full command without mocking API calls,
 	// but we can test the flag parsing behavior
@@ -135,6 +138,19 @@ func TestResourceCommandFilterLogic(t *testing.T) {
 }
 
 func TestCreateResourceFlagParsing(t *testing.T) {
+	previousName, previousType, previousFile := createName, createType, createFile
+	previousLabels, previousProperties := createLabels, createProperties
+	labelFlag, propertyFlag := createResourceCmd.Flags().Lookup("label"), createResourceCmd.Flags().Lookup("property")
+	labelValue, propertyValue := labelFlag.Value, propertyFlag.Value
+	isolated := pflag.NewFlagSet("isolated", pflag.ContinueOnError)
+	isolated.StringSliceVar(&createLabels, "label", []string{}, "")
+	isolated.StringToStringVar(&createProperties, "property", nil, "")
+	labelFlag.Value, propertyFlag.Value = isolated.Lookup("label").Value, isolated.Lookup("property").Value
+	t.Cleanup(func() {
+		createName, createType, createFile = previousName, previousType, previousFile
+		createLabels, createProperties = previousLabels, previousProperties
+		labelFlag.Value, propertyFlag.Value = labelValue, propertyValue
+	})
 	// Test create resource flag parsing
 	testName := "Test Resource"
 	testType := "Test Type"
@@ -227,8 +243,12 @@ func TestResourcesCommandInitialization(t *testing.T) {
 
 func TestCommandExecutionSetup(t *testing.T) {
 	// Test that commands are set up correctly with viper integration
-	// Reset viper
-	viper.Reset()
+	previousURL, previousToken, previousJSON := viper.Get("url"), viper.Get("token"), viper.Get("json")
+	t.Cleanup(func() {
+		viper.Set("url", previousURL)
+		viper.Set("token", previousToken)
+		viper.Set("json", previousJSON)
+	})
 	viper.Set("url", "http://test.example.com")
 	viper.Set("token", "test-token")
 	viper.Set("json", false)
@@ -274,6 +294,8 @@ func TestFlagConsistency(t *testing.T) {
 
 func TestResourceCommandContext(t *testing.T) {
 	// Test that commands work within Cobra context
+	previousOut, previousErr := rootCmd.OutOrStdout(), rootCmd.ErrOrStderr()
+	t.Cleanup(func() { rootCmd.SetOut(previousOut); rootCmd.SetErr(previousErr); rootCmd.SetArgs(nil) })
 	buf := new(bytes.Buffer)
 	rootCmd.SetOut(buf)
 	rootCmd.SetErr(buf)

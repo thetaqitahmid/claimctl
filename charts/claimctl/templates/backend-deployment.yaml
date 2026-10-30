@@ -125,6 +125,12 @@ spec:
           readinessProbe:
             {{- toYaml .Values.backend.readinessProbe | nindent 12 }}
           env:
+            - name: DATABASE_URL
+              value: ""
+            - name: TRUSTED_PROXY_CIDRS
+              value: {{ .Values.backend.trustedProxyCIDRs | quote }}
+            - name: COOKIE_SECURE
+              value: {{ .Values.backend.cookieSecure | quote }}
             - name: DB_HOST
               value: {{ if .Values.postgres.enabled }}{{ include "claimctl.postgresHost" . | quote }}{{ else }}{{ .Values.db.host | quote }}{{ end }}
             - name: DB_PORT

@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"time"
 
 	"github.com/google/uuid"
 
@@ -33,6 +34,8 @@ func NewNotificationService(db db.Querier, dispatchers []NotificationDispatcher,
 }
 
 func (s *notificationService) Notify(ctx context.Context, userID uuid.UUID, event string, payload NotificationPayload) error {
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
 	user, err := s.db.FindUserById(ctx, userID)
 	if err != nil {
 		return fmt.Errorf("failed to find user for notification: %w", err)
@@ -80,15 +83,9 @@ func (s *notificationService) Notify(ctx context.Context, userID uuid.UUID, even
 			continue
 		}
 
-		// Dispatch
-		go func(d NotificationDispatcher, r string) {
-			err := d.Dispatch(context.Background(), r, payload)
-			if err != nil {
-				slog.Error("Failed to dispatch notification", "channel", d.Type(), "recipient", r, "error", err)
-			} else {
-				slog.Info("Sent notification", "channel", d.Type(), "recipient", r)
-			}
-		}(dispatcher, recipient)
+		if err := dispatcher.Dispatch(ctx, recipient, payload); err != nil {
+			slog.Error("Failed to dispatch notification", "channel", dispatcher.Type())
+		}
 	}
 
 	return nil

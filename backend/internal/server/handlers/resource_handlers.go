@@ -13,19 +13,19 @@ type UpdateResourceType = db.UpdateResourceByIdParams
 
 type ResourceHandler struct {
 	resourceService services.ResourceService
-	auditService services.AuditService
+	auditService    services.AuditService
 }
 
 func NewResourceHandler(resourceService services.ResourceService, auditService services.AuditService) *ResourceHandler {
 	return &ResourceHandler{
 		resourceService: resourceService,
-		auditService: auditService,
+		auditService:    auditService,
 	}
 }
 
 // GetResources returns all resources
 // @Summary Get all resources
-// @Description Retrieve a list of all resources. Note: This might return all resources regardless of permissions in the current implementation.
+// @Description Retrieve resources visible to the current account.
 // @Tags resources
 // @Accept json
 // @Produce json
@@ -33,10 +33,9 @@ func NewResourceHandler(resourceService services.ResourceService, auditService s
 // @Failure 500 {object} map[string]string
 // @Router /resources [get]
 func (h *ResourceHandler) GetResources(c *fiber.Ctx) error {
-	if !h.isAdmin(c) {
-		return c.Status(fiber.StatusForbidden).JSON(fiber.Map{
-			"error": "You do not have permission to view all resources",
-		})
+	user, err := GetUserFromContext(c)
+	if err != nil {
+		return utils.SendError(c, fiber.StatusUnauthorized, "Unauthorized", err)
 	}
 
 	labelExprStr := c.Query("label_expr")
@@ -47,7 +46,7 @@ func (h *ResourceHandler) GetResources(c *fiber.Ctx) error {
 		})
 	}
 
-	resources, err := h.resourceService.GetAllResources(c.Context(), labelFilter)
+	resources, err := h.resourceService.GetAllResourcesForUser(c.UserContext(), user.ID, h.isAdmin(c), labelFilter)
 	if err != nil {
 		return utils.SendError(c, fiber.StatusInternalServerError, "Failed to get resources", err)
 	}

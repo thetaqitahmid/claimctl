@@ -13,9 +13,10 @@ import (
 )
 
 const createAPIToken = `-- name: CreateAPIToken :one
-INSERT INTO claimctl.api_tokens (user_id, name, token_hash, expires_at)
-VALUES ($1, $2, $3, $4)
-RETURNING id, user_id, name, token_hash, created_at, expires_at, last_used_at
+INSERT INTO claimctl.api_tokens
+    (user_id, name, token_hash, expires_at, scopes, space_ids)
+VALUES ($1, $2, $3, $4, $5, $6)
+RETURNING id, user_id, name, token_hash, created_at, expires_at, last_used_at, scopes, space_ids
 `
 
 type CreateAPITokenParams struct {
@@ -23,6 +24,8 @@ type CreateAPITokenParams struct {
 	Name      string             `json:"name"`
 	TokenHash string             `json:"tokenHash"`
 	ExpiresAt pgtype.Timestamptz `json:"expiresAt"`
+	Scopes    []string           `json:"scopes"`
+	SpaceIds  []uuid.UUID        `json:"spaceIds"`
 }
 
 func (q *Queries) CreateAPIToken(ctx context.Context, arg CreateAPITokenParams) (ClaimctlApiToken, error) {
@@ -31,6 +34,8 @@ func (q *Queries) CreateAPIToken(ctx context.Context, arg CreateAPITokenParams) 
 		arg.Name,
 		arg.TokenHash,
 		arg.ExpiresAt,
+		arg.Scopes,
+		arg.SpaceIds,
 	)
 	var i ClaimctlApiToken
 	err := row.Scan(
@@ -41,12 +46,14 @@ func (q *Queries) CreateAPIToken(ctx context.Context, arg CreateAPITokenParams) 
 		&i.CreatedAt,
 		&i.ExpiresAt,
 		&i.LastUsedAt,
+		&i.Scopes,
+		&i.SpaceIds,
 	)
 	return i, err
 }
 
 const getAPITokenByHash = `-- name: GetAPITokenByHash :one
-SELECT id, user_id, name, token_hash, created_at, expires_at, last_used_at FROM claimctl.api_tokens
+SELECT id, user_id, name, token_hash, created_at, expires_at, last_used_at, scopes, space_ids FROM claimctl.api_tokens
 WHERE token_hash = $1
 LIMIT 1
 `
@@ -62,12 +69,14 @@ func (q *Queries) GetAPITokenByHash(ctx context.Context, tokenHash string) (Clai
 		&i.CreatedAt,
 		&i.ExpiresAt,
 		&i.LastUsedAt,
+		&i.Scopes,
+		&i.SpaceIds,
 	)
 	return i, err
 }
 
 const listAPITokens = `-- name: ListAPITokens :many
-SELECT id, user_id, name, token_hash, created_at, expires_at, last_used_at FROM claimctl.api_tokens
+SELECT id, user_id, name, token_hash, created_at, expires_at, last_used_at, scopes, space_ids FROM claimctl.api_tokens
 WHERE user_id = $1
 ORDER BY created_at DESC
 `
@@ -89,6 +98,8 @@ func (q *Queries) ListAPITokens(ctx context.Context, userID uuid.UUID) ([]Claimc
 			&i.CreatedAt,
 			&i.ExpiresAt,
 			&i.LastUsedAt,
+			&i.Scopes,
+			&i.SpaceIds,
 		); err != nil {
 			return nil, err
 		}

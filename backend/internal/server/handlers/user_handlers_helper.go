@@ -6,8 +6,6 @@ import (
 
 	"github.com/coreos/go-oidc/v3/oidc"
 	"github.com/gofiber/fiber/v2"
-	"github.com/golang-jwt/jwt/v5"
-	"github.com/google/uuid"
 	"golang.org/x/oauth2"
 
 	"github.com/thetaqitahmid/claimctl/internal/db"
@@ -17,29 +15,8 @@ import (
 func GetUserFromContext(c *fiber.Ctx) (*db.ClaimctlUser, error) {
 	// 1. Check for API Token User Record
 	if userRecord := c.Locals("user_record"); userRecord != nil {
-		if u, ok := userRecord.(*db.ClaimctlUser); ok {
+		if u, ok := userRecord.(*db.ClaimctlUser); ok && u != nil && u.Status == "active" {
 			return u, nil
-		}
-	}
-
-	// 2. Check for JWT
-	if userToken := c.Locals("user"); userToken != nil {
-		if token, ok := userToken.(*jwt.Token); ok {
-			claims := token.Claims.(jwt.MapClaims)
-			userIDStr := fmt.Sprintf("%v", claims["id"])
-			userID, err := uuid.Parse(userIDStr)
-			if err != nil {
-				return nil, fmt.Errorf("invalid user ID in token")
-			}
-
-			return &db.ClaimctlUser{
-				ID:    userID,
-				Email: claims["email"].(string),
-				Name:  claims["name"].(string),
-
-				Role:   claims["role"].(string),
-				Status: claims["status"].(string),
-			}, nil
 		}
 	}
 

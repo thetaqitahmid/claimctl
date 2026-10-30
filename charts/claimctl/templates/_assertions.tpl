@@ -3,6 +3,9 @@ Fail-close validation of required configuration. Included from the backend
 deployment so misconfigured releases are rejected before anything is applied.
 */}}
 {{- define "claimctl.assertValues" -}}
+{{- if not .Values.backend.trustedProxyCIDRs -}}
+  {{- fail "claimctl: backend.trustedProxyCIDRs is required for the actual frontend and ingress peer networks; do not trust all addresses" -}}
+{{- end -}}
 {{- if not .Values.postgres.enabled -}}
   {{- if not (or .Values.db.host .Values.db.existingSecret) -}}
     {{- fail "claimctl: db.host must be set when postgres.enabled is false" -}}

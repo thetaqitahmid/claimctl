@@ -18,6 +18,26 @@ func NewWebhookHandler(service *services.WebhookService) *WebhookHandler {
 	return &WebhookHandler{service: service}
 }
 
+func (h *WebhookHandler) ListDeadDeliveries(c *fiber.Ctx) error {
+	rows, err := h.service.ListDeliveries(c.Context(), uuid.Nil)
+	if err != nil {
+		return utils.SendError(c, fiber.StatusInternalServerError, "Failed to list dead deliveries", err)
+	}
+	return c.JSON(rows)
+}
+
+func (h *WebhookHandler) ListDeliveries(c *fiber.Ctx) error {
+	id, err := utils.GetUUIDParam(c, "id")
+	if err != nil {
+		return nil
+	}
+	rows, err := h.service.ListDeliveries(c.Context(), id)
+	if err != nil {
+		return utils.SendError(c, fiber.StatusInternalServerError, "Failed to list deliveries", err)
+	}
+	return c.JSON(rows)
+}
+
 func (h *WebhookHandler) CreateWebhook(c *fiber.Ctx) error {
 	type Request struct {
 		Name        string            `json:"name"`
@@ -62,7 +82,7 @@ func (h *WebhookHandler) ListWebhooks(c *fiber.Ctx) error {
 	}
 
 	type WebhookResponse struct {
-		ID uuid.UUID           `json:"id"`
+		ID            uuid.UUID       `json:"id"`
 		Name          string          `json:"name"`
 		Url           string          `json:"url"`
 		Method        string          `json:"method"`

@@ -1,14 +1,14 @@
 package cmd
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"strings"
 	"text/tabwriter"
 	"time"
-
-	"claimctl-cli/pkg/api"
 
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
@@ -24,7 +24,7 @@ var reservationsListCmd = &cobra.Command{
 	Use:   "list",
 	Short: "List your active and queued reservations",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		client, err := api.NewClient(viper.GetString("url"), viper.GetString("token"), viper.GetBool("netrc"))
+		client, err := newClient(cmd)
 		if err != nil {
 			return fmt.Errorf("error creating client: %w", err)
 		}
@@ -35,6 +35,9 @@ var reservationsListCmd = &cobra.Command{
 		}
 
 		if len(reservations) == 0 {
+			if viper.GetBool("json") {
+				return outputJSON(cmd, []any{})
+			}
 			fmt.Println("No active or pending reservations found.")
 			return nil
 		}
@@ -78,7 +81,7 @@ var reservationsStatusCmd = &cobra.Command{
 	Short: "Get status of a specific reservation",
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		client, err := api.NewClient(viper.GetString("url"), viper.GetString("token"), viper.GetBool("netrc"))
+		client, err := newClient(cmd)
 		if err != nil {
 			return fmt.Errorf("error creating client: %w", err)
 		}
@@ -122,7 +125,7 @@ var reservationsWaitCmd = &cobra.Command{
 	Short: "Wait for a reservation to become active",
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		client, err := api.NewClient(viper.GetString("url"), viper.GetString("token"), viper.GetBool("netrc"))
+		client, err := newClient(cmd)
 		if err != nil {
 			return fmt.Errorf("error creating client: %w", err)
 		}
@@ -136,6 +139,9 @@ var reservationsWaitCmd = &cobra.Command{
 		}
 
 		if reservation.Status == "active" {
+			if viper.GetBool("json") {
+				return outputJSON(cmd, reservation)
+			}
 			if !viper.GetBool("json") {
 				fmt.Println("Reservation is already active")
 			}
@@ -163,21 +169,28 @@ var reservationsWaitCmd = &cobra.Command{
 
 		err = client.WaitForReservation(id, waitTimeout, waitPollInterval, progressFn)
 		if err != nil {
-			if strings.Contains(err.Error(), "timeout") {
+			if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) {
 				// Cancel the reservation before exiting on timeout
 				if !viper.GetBool("json") {
 					fmt.Fprintf(os.Stderr, "Wait timeout expired. Cancelling reservation %s...\n", id)
 				}
-				if cancelErr := client.CancelReservation(id); cancelErr != nil {
-					fmt.Fprintf(os.Stderr, "Warning: failed to cancel reservation: %v\n", cancelErr)
+				if cancelErr := cleanupReservation(client, id); cancelErr != nil {
+					return errors.Join(err, fmt.Errorf("cleanup reservation %s: %w", id, cancelErr))
 				}
-				return NewTimeoutError("Timeout waiting for reservation to become active")
+				return err
 			} else if strings.Contains(err.Error(), "cancelled") {
 				return NewCancelledError("Reservation was cancelled")
 			}
 			return err
 		}
 
+		if viper.GetBool("json") {
+			result, err := client.GetReservation(id)
+			if err != nil {
+				return err
+			}
+			return outputJSON(cmd, result)
+		}
 		if !viper.GetBool("json") {
 			fmt.Println("Reservation is now active")
 		}
@@ -190,7 +203,7 @@ var reservationsHistoryCmd = &cobra.Command{
 	Use:   "history",
 	Short: "View your reservation history",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		client, err := api.NewClient(viper.GetString("url"), viper.GetString("token"), viper.GetBool("netrc"))
+		client, err := newClient(cmd)
 		if err != nil {
 			return fmt.Errorf("error creating client: %w", err)
 		}
@@ -201,6 +214,9 @@ var reservationsHistoryCmd = &cobra.Command{
 		}
 
 		if len(history) == 0 {
+			if viper.GetBool("json") {
+				return outputJSON(cmd, []any{})
+			}
 			fmt.Println("No reservation history found.")
 			return nil
 		}

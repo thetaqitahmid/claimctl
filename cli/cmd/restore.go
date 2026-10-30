@@ -5,8 +5,6 @@ import (
 	"fmt"
 	"os"
 
-	"claimctl-cli/pkg/api"
-
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 )
@@ -52,7 +50,7 @@ instance already has data.`,
 			return fmt.Errorf("invalid backup file: missing metadata field")
 		}
 
-		client, err := api.NewClient(viper.GetString("url"), viper.GetString("token"), viper.GetBool("netrc"))
+		client, err := newClient(cmd)
 		if err != nil {
 			return fmt.Errorf("error creating client: %w", err)
 		}

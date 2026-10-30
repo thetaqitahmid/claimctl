@@ -22,17 +22,17 @@ func TestAdminMiddleware(t *testing.T) {
 
 		if authType == "api-token-admin" {
 			c.Locals("user_record", &db.ClaimctlUser{
-				ID: testutils.TestUUID(1),
-				Email: "admin@example.com",
-
-				Role: "admin",
+				ID:     testutils.TestUUID(1),
+				Email:  "admin@example.com",
+				Status: "active",
+				Role:   "admin",
 			})
 		} else if authType == "api-token-user" {
 			c.Locals("user_record", &db.ClaimctlUser{
-				ID: testutils.TestUUID(2),
-				Email: "user@example.com",
-
-				Role: "user",
+				ID:     testutils.TestUUID(2),
+				Email:  "user@example.com",
+				Status: "active",
+				Role:   "user",
 			})
 		} else if authType == "jwt-admin" {
 			token := &jwt.Token{
@@ -84,14 +84,14 @@ func TestAdminMiddleware(t *testing.T) {
 			expectedStatus: http.StatusForbidden,
 		},
 		{
-			name:           "JWT Admin should convert to 200 OK",
+			name:           "JWT claims alone cannot grant admin",
 			authType:       "jwt-admin",
-			expectedStatus: http.StatusOK,
+			expectedStatus: http.StatusUnauthorized,
 		},
 		{
-			name:           "JWT Non-Admin should convert to 403 Forbidden",
+			name:           "JWT claims alone are not authenticated",
 			authType:       "jwt-user",
-			expectedStatus: http.StatusForbidden,
+			expectedStatus: http.StatusUnauthorized,
 		},
 		{
 			name:           "Unauthenticated should convert to 401 Unauthorized",

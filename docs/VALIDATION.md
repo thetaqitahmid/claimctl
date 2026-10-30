@@ -14,9 +14,17 @@ make sqlc
 git diff --exit-code -- backend/internal/db
 ```
 
-`make test` includes backend and CLI tests plus frontend lint, tests, and the
-production build. Without a database URL, the backend integration tests skip;
-a green standard suite alone is not sufficient release evidence.
+`make test` includes Helm validation, backend and CLI tests, frontend lint,
+frontend tests, and the production build. Helm must be installed, and fetching
+the chart's locked dependencies requires network access to its repository.
+Without a database URL, backend integration tests skip; a green standard suite
+alone is not sufficient release evidence.
+
+Run only the chart checks with `make helm_lint`. This registers the dependency
+repository, builds from `Chart.lock`, and runs both lint and template checks
+using `charts/claimctl/ci/lint-values.yaml`. The Helm workflow uses the same
+synthetic values. They are validation fixtures, not deployment defaults:
+actual releases must configure their own trusted frontend and ingress peers.
 
 ## Disposable database integration tests
 

@@ -1,4 +1,4 @@
-.PHONY: backend_up backend_down frontend_up dev_up dev_down db_up db_down test test_integration test_deployment test_cli_terminal
+.PHONY: backend_up backend_down frontend_up dev_up dev_down db_up db_down test test_integration test_deployment test_cli_terminal helm_lint
 
 db_up:
 	@docker compose -f tests/db/postgres-compose.yaml up -d
@@ -25,7 +25,7 @@ dev_up:
 
 dev_down: backend_down
 
-test:
+test: helm_lint
 	@cd backend && go test ./...
 	@cd frontend && npm run lint && npm run test && npm run build
 	@cd cli && go test ./...
@@ -36,11 +36,16 @@ test_integration:
 	@cd backend && go test -race -count=1 ./...
 	@cd cli && go test -race -count=1 ./...
 
-test_deployment:
+helm_lint:
+	@helm repo add groundhog2k https://groundhog2k.github.io/helm-charts/
+	@helm dependency build charts/claimctl
+	@helm lint charts/claimctl -f charts/claimctl/ci/lint-values.yaml
+	@helm template claimctl charts/claimctl -f charts/claimctl/ci/lint-values.yaml >/dev/null
+
+test_deployment: helm_lint
 	@python3 deployment/helm_replica_test.py
 	@python3 deployment/replica_config_test.py
 	@sh deployment/postgres-preflight_test.sh
-	@helm lint charts/claimctl --set backend.trustedProxyCIDRs=10.244.0.0/16
 
 test_cli_terminal:
 	@python3 cli/tests/exec_pty_test.py

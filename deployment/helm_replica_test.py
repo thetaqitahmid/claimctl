@@ -27,6 +27,32 @@ class HelmReplicaTest(unittest.TestCase):
         container = deployment["spec"]["template"]["spec"]["containers"][0]
         return {entry["name"]: entry for entry in container["env"]}
 
+    def test_pipeline_validation_commands(self):
+        workflow = yaml.safe_load(
+            (ROOT / ".github/workflows/helm.yml").read_text())
+        steps = workflow["jobs"]["lint"]["steps"]
+        for name in ["Lint chart", "Template chart"]:
+            with self.subTest(step=name):
+                script = next(step["run"] for step in steps
+                              if step.get("name") == name)
+                result = subprocess.run(
+                    ["sh", "-ec", script], cwd=ROOT,
+                    capture_output=True, text=True)
+                self.assertEqual(result.returncode, 0,
+                                 result.stdout + result.stderr)
+
+    def test_make_test_includes_helm_validation(self):
+        result = subprocess.run(
+            ["make", "--dry-run", "test"], cwd=ROOT,
+            capture_output=True, text=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("helm dependency build charts/claimctl", result.stdout)
+        for command in ["helm lint charts/claimctl",
+                        "helm template claimctl charts/claimctl"]:
+            self.assertIn(
+                command + " -f charts/claimctl/ci/lint-values.yaml",
+                result.stdout)
+
     def test_proxy_trust_is_required(self):
         result = self.render()
         self.assertNotEqual(result.returncode, 0)

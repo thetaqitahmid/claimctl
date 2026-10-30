@@ -33,12 +33,13 @@ jobs:
       - name: Lint chart
         run: |
           echo "Linting the claimctl chart..."
-          helm lint charts/claimctl
+          helm lint charts/claimctl -f charts/claimctl/ci/lint-values.yaml
 
       - name: Template chart
         run: |
-          echo "Rendering templates with default values..."
-          helm template claimctl charts/claimctl > /dev/null
+          echo "Rendering templates with synthetic CI values..."
+          helm template claimctl charts/claimctl \
+            -f charts/claimctl/ci/lint-values.yaml > /dev/null
 
   publish:
     runs-on: ubuntu-latest

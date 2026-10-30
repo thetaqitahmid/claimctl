@@ -1,0 +1,6 @@
+# Synthetic networks for validation only. Deployments must supply their actual
+# frontend and ingress peer CIDRs rather than reuse these fixture values.
+backend:
+  trustedProxyCIDRs: "10.244.0.0/16"
+frontend:
+  trustedIngressCIDR: "10.245.0.0/16"

@@ -1,6 +1,9 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { render, screen } from '@testing-library/react';
+import '../test/i18n';
 import HealthStatusIndicator from './HealthStatusIndicator';
+
+vi.unmock('react-i18next');
 
 describe('HealthStatusIndicator', () => {
   it('renders healthy status', () => {
@@ -56,6 +59,11 @@ describe('HealthStatusIndicator', () => {
 
     const badge = screen.getByText('Healthy');
     expect(badge.getAttribute('title')).toContain('Response time: 150ms');
+  });
+
+  it('includes zero response time rather than hiding it', () => {
+    render(<HealthStatusIndicator status="healthy" responseTimeMs={0} />);
+    expect(screen.getByText('Healthy')).toHaveAttribute('title', expect.stringContaining('Response time: 0ms'));
   });
 
   it('includes error message in tooltip when provided', () => {

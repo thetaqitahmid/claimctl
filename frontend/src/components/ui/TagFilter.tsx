@@ -1,4 +1,5 @@
-import { useMemo, useState, useRef, useEffect } from "react";
+import { useMemo, useState, useRef, useEffect, useId } from "react";
+import { useTranslation } from "react-i18next";
 import { X, ChevronDown, Tags } from "lucide-react";
 
 interface TagFilterProps {
@@ -8,7 +9,10 @@ interface TagFilterProps {
 }
 
 const TagFilter = ({ allTags, selectedTags, onChange }: TagFilterProps) => {
+  const { t } = useTranslation("components");
   const [isOpen, setIsOpen] = useState(false);
+  const panelId = useId();
+  const triggerRef = useRef<HTMLButtonElement>(null);
   const dropdownRef = useRef<HTMLDivElement>(null);
 
   // Close dropdown when clicking outside
@@ -51,7 +55,13 @@ const TagFilter = ({ allTags, selectedTags, onChange }: TagFilterProps) => {
   }, [allTags]);
 
   return (
-    <div className="relative w-full" ref={dropdownRef}>
+    <div className="relative w-full" ref={dropdownRef} onKeyDown={(event) => {
+      if (event.key === "Escape" && isOpen) {
+        event.stopPropagation();
+        setIsOpen(false);
+        triggerRef.current?.focus();
+      }
+    }}>
       {/* Selected Tags Display */}
       {selectedTags.length > 0 && (
         <div className="flex flex-wrap gap-1 mb-2">
@@ -64,7 +74,7 @@ const TagFilter = ({ allTags, selectedTags, onChange }: TagFilterProps) => {
               <button
                 onClick={(e) => handleRemoveTag(tag, e)}
                 className="hover:text-cyan-300 transition-colors"
-                title={`Remove ${tag}`}
+                title={t("resourceFilters.remove", { value: tag })}
               >
                 <X className="w-3 h-3" />
               </button>
@@ -73,15 +83,20 @@ const TagFilter = ({ allTags, selectedTags, onChange }: TagFilterProps) => {
           <button
             onClick={handleClearAll}
             className="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-medium text-slate-400 hover:text-white hover:bg-slate-800 transition-colors"
-            title="Clear all tags"
+            aria-label={t("resourceFilters.clearTags")}
+            title={t("resourceFilters.clearTags")}
           >
-            Clear all
+            {t("resourceFilters.clearAll")}
           </button>
         </div>
       )}
 
       {/* Dropdown Trigger */}
       <button
+        ref={triggerRef}
+        aria-expanded={isOpen}
+        aria-controls={panelId}
+        aria-label={t("resourceFilters.tags")}
         onClick={(e) => {
           e.stopPropagation();
           setIsOpen(!isOpen);
@@ -91,18 +106,18 @@ const TagFilter = ({ allTags, selectedTags, onChange }: TagFilterProps) => {
         <span className="flex items-center gap-1 truncate">
           <Tags className="w-3 h-3" />
           {selectedTags.length > 0
-            ? `${selectedTags.length} tag${selectedTags.length > 1 ? "s" : ""} selected`
-            : "Filter by tags..."}
+            ? t("resourceFilters.selectedTags", { count: selectedTags.length })
+            : t("resourceFilters.tags")}
         </span>
         <ChevronDown className={`w-3 h-3 transition-transform ${isOpen ? "rotate-180" : ""}`} />
       </button>
 
       {/* Dropdown Menu */}
       {isOpen && (
-        <div className="absolute z-50 mt-1 w-full max-h-64 overflow-auto rounded-lg bg-slate-900 border border-slate-700 shadow-2xl">
+        <div id={panelId} role="group" aria-label={t("resourceFilters.tags")} className="absolute z-50 mt-1 w-full max-h-64 overflow-auto rounded-lg bg-slate-900 border border-slate-700 shadow-2xl">
           {sortedTags.length === 0 ? (
             <div className="px-3 py-2 text-xs text-slate-500 italic">
-              No tags available
+              {t("resourceFilters.noTags")}
             </div>
           ) : (
             <div className="py-1">
@@ -111,6 +126,7 @@ const TagFilter = ({ allTags, selectedTags, onChange }: TagFilterProps) => {
                 return (
                   <button
                     key={tag}
+                    aria-pressed={isSelected}
                     onClick={(e) => {
                       e.stopPropagation();
                       handleToggleTag(tag);

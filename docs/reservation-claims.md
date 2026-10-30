@@ -98,7 +98,32 @@ Release/cancellation end time cannot precede an existing rounded start time.
 The existing `check_time_order` constraint remains intact. No sleeps are
 required before completing or cancelling a newly created reservation.
 
-Later lease/bundle work should reuse `ClaimRequest`, `ReservationPolicy`, the
+Lease and bundle operations share `ClaimRequest`, `ReservationPolicy`, the
 user-before-resource lock order, and the atomic idempotency result contract.
-Creation events are emitted after commit by the existing delivery mechanism;
-transactional delivery is assigned to the subsequent outbox component.
+Quota excludes claims whose lease, scheduled hold, or hard deadline has
+elapsed, even before the expiry worker runs. Acquisition reclaims expired
+claims under the resource lock before checking for duplicate ownership.
+Creation delivery intent commits atomically through the outbox trigger; see
+[durable delivery](durable-delivery.md).
+
+## Browser reservations
+
+The browser reads the current policy before offering a reservation. The
+initial selection uses the server default, not an implicit indefinite hold.
+Indefinite holds are explicit and shown only when policy permits them. Custom
+durations use positive whole days, hours, and minutes, bounded by the policy
+maximum. The server remains authoritative for policy and availability.
+
+The dialog stays open until the request succeeds and blocks duplicate
+submissions or dismissal while confirmation is pending. Failures retain the
+selection and display recovery guidance. Retries of an unchanged request use
+the same idempotency key; a changed selection starts a new logical request.
+Success distinguishes an active reservation from a queued position.
+
+Resource refreshes and row mutations retain the table, filters, and displayed
+data. Refresh failures identify stale data and expose a retry. Reservation
+actions are disabled while personal reservation state is unavailable. Mobile
+space selection stays in the content column and recovers removed selections.
+Workflow controls, dialogs, filters, and statuses use translation keys and
+accessible names. See [release validation](VALIDATION.md) for coverage and
+manual acceptance guidance.

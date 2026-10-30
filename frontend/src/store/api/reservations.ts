@@ -1,5 +1,6 @@
 import { createApi } from "@reduxjs/toolkit/query/react";
 import { baseQueryWithReauth } from "./baseQuery";
+import { ReservationOptions, ReservationPolicy, UserReservation } from "../../types";
 
 export interface CreateReservationRequest {
   resourceId: string;
@@ -11,6 +12,21 @@ export const reservationsApiSlice = createApi({
   tagTypes: ["Reservation"],
   endpoints: (builder) => {
     return {
+      getReservationPolicy: builder.query<ReservationPolicy, void>({
+        query: () => "/reservations/policy",
+      }),
+      claimReservation: builder.mutation<UserReservation, {
+        request: ReservationOptions & CreateReservationRequest;
+        idempotencyKey: string;
+      }>({
+        query: ({ request, idempotencyKey }) => ({
+          url: "/reservations/claim",
+          method: "POST",
+          headers: { "Idempotency-Key": idempotencyKey },
+          body: request,
+        }),
+        invalidatesTags: ["Reservation"],
+      }),
       createReservation: builder.mutation<void, CreateReservationRequest>({
         query: (request) => ({
           url: "/reservations",
@@ -67,6 +83,8 @@ export const reservationsApiSlice = createApi({
 });
 
 export const {
+  useGetReservationPolicyQuery,
+  useClaimReservationMutation,
   useCreateReservationMutation,
   useCreateTimedReservationMutation,
   useCancelReservationMutation,

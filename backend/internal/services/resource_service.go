@@ -537,9 +537,6 @@ func (s *resourceService) SetMaintenanceMode(ctx context.Context, resourceID uui
 		return nil, err
 	}
 
-	// TODO: Broadcast maintenance change event via SSE
-	// Requires moving realtimeService initialization before resourceService in routes.go
-
 	return &updatedResource, nil
 }
 

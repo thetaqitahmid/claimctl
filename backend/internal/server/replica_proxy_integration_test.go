@@ -16,6 +16,7 @@ import (
 	"github.com/gofiber/fiber/v2"
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
+
 	"github.com/thetaqitahmid/claimctl/internal/db"
 	"github.com/thetaqitahmid/claimctl/internal/server/handlers"
 	"github.com/thetaqitahmid/claimctl/internal/services"
@@ -27,8 +28,10 @@ func TestReplicaNginxTLSIngressAndSSERealDatabase(t *testing.T) {
 	if _, err := exec.LookPath("docker"); err != nil {
 		t.Skip("Docker required for isolated Nginx proxy regression")
 	}
-	if err := exec.Command("docker", "image", "inspect", "nginx:alpine").Run(); err != nil {
-		t.Skip("nginx:alpine image required")
+	inspectCtx, cancelInspect := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancelInspect()
+	if err := exec.CommandContext(inspectCtx, "docker", "--context", "default", "image", "inspect", "nginx:alpine").Run(); err != nil {
+		t.Skip("nginx:alpine image required on the local default Docker context")
 	}
 	t.Setenv("TRUSTED_PROXY_CIDRS", "127.0.0.1/32")
 	t.Setenv("COOKIE_SECURE", "false")
@@ -58,15 +61,31 @@ func TestReplicaNginxTLSIngressAndSSERealDatabase(t *testing.T) {
 	require.NoError(t, err)
 	rendered := strings.NewReplacer("${BACKEND_HOST}", "127.0.0.1", "${BACKEND_PORT}", backendURL.Port(), "${TRUSTED_INGRESS_CIDR}", "127.0.0.1/32", "listen 8080;", "listen "+address+";").Replace(string(template))
 	dir := t.TempDir()
-	require.NoError(t, os.WriteFile(filepath.Join(dir, "default.conf"), []byte(rendered), 0600))
-	require.NoError(t, os.WriteFile(filepath.Join(dir, "nginx.conf"), []byte("pid /tmp/nginx.pid;\nevents {}\nhttp { access_log off; include /tmp/default.conf; }\n"), 0600))
 	name := "claimctl-nginx-test-" + uuid.NewString()
-	command := exec.Command("docker", "run", "--rm", "--network", "host", "--name", name,
-		"-v", filepath.Join(dir, "default.conf")+":/tmp/default.conf:ro",
-		"-v", filepath.Join(dir, "nginx.conf")+":/tmp/nginx.conf:ro",
-		"nginx:alpine", "nginx", "-c", "/tmp/nginx.conf", "-g", "daemon off;")
+	containerCtx, cancelContainer := context.WithTimeout(context.Background(), 2*time.Minute)
+	t.Cleanup(cancelContainer)
+	command := exec.CommandContext(containerCtx, "docker", "--context", "default", "run", "--rm", "--network", "host", "--name", name,
+		"--entrypoint", "sh", "nginx:alpine", "-c",
+		"printf '%s' \"$1\" > /tmp/nginx.conf; exec nginx -c /tmp/nginx.conf -g 'daemon off;'",
+		"sh", "pid /tmp/nginx.pid;\nevents {}\nhttp { access_log off;\n"+rendered+"\n}\n")
+	logPath := filepath.Join(dir, "nginx.log")
+	logFile, err := os.Create(logPath)
+	require.NoError(t, err)
+	command.Stdout = logFile
+	command.Stderr = logFile
 	require.NoError(t, command.Start())
-	t.Cleanup(func() { _ = exec.Command("docker", "stop", "-t", "1", name).Run(); _ = command.Wait() })
+	t.Cleanup(func() {
+		cleanupCtx, cancelCleanup := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancelCleanup()
+		_ = exec.CommandContext(cleanupCtx, "docker", "--context", "default", "stop", "-t", "1", name).Run()
+		cancelContainer()
+		_ = command.Wait()
+		_ = logFile.Close()
+		if t.Failed() {
+			output, _ := os.ReadFile(logPath)
+			t.Logf("Nginx container output:\n%s", output)
+		}
+	})
 	proxy := "http://" + address
 	require.Eventually(t, func() bool {
 		client := http.Client{Timeout: 100 * time.Millisecond}
@@ -76,7 +95,7 @@ func TestReplicaNginxTLSIngressAndSSERealDatabase(t *testing.T) {
 		}
 		response.Body.Close()
 		return response.StatusCode == 200
-	}, 5*time.Second, 20*time.Millisecond, "isolated Nginx must start")
+	}, 30*time.Second, 100*time.Millisecond, "isolated Nginx must start")
 	response, err := http.Get(proxy + "/api/auth/csrf")
 	require.NoError(t, err)
 	var data struct {

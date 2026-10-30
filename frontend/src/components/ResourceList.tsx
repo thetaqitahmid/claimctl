@@ -1,20 +1,17 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect, useRef } from "react";
 import { useTranslation } from "react-i18next";
-// import ResourceItem from "./ResourceItem"; // Deprecated in favor of ResourceTable
 import ResourceTable from "./ResourceTable";
 import ResourceDetailsModal from "./ResourceDetailsModal";
 import ConfirmationModal from "./ConfirmationModal";
 import ReservationModal from "./ReservationModal";
-import { Resource, ResourceWithStatus, Space } from "../types";
+import { Resource, ResourceWithStatus, ReservationOptions, Space } from "../types";
 import {
   useGetResourcesQuery,
-  useUpdateResourceMutation,
   useDeleteResourceMutation,
   useSetMaintenanceModeMutation,
 } from "../store/api/resources";
 import {
-  useCreateReservationMutation,
-  useCreateTimedReservationMutation,
+  useClaimReservationMutation,
   useCancelReservationMutation,
   useCompleteReservationMutation,
   useGetUserReservationsQuery,
@@ -50,7 +47,8 @@ const ResourceList = () => {
   const {
     data: resourcesWithStatus = [],
     error: apiError,
-    isLoading: isFetching,
+    isLoading,
+    isFetching,
     refetch: refetchResources,
   } = useGetResourcesQuery();
   const { data: spaces } = useGetSpacesQuery();
@@ -59,17 +57,28 @@ const ResourceList = () => {
     null,
   );
 
-  const [deleteResource, { isLoading: isDeleting }] =
-    useDeleteResourceMutation();
-  const [createReservation] = useCreateReservationMutation();
-  const [createTimedReservation] = useCreateTimedReservationMutation();
+  const [deleteResource] = useDeleteResourceMutation();
+  const [claimReservation] = useClaimReservationMutation();
+  const reservationAttempt = useRef<{ fingerprint: string; key: string } | null>(null);
+  const actionsInFlight = useRef(new Set<string>());
+  const [busyResourceIds, setBusyResourceIds] = useState<string[]>([]);
+  const startAction = (id: string) => {
+    if (actionsInFlight.current.has(id)) return false;
+    actionsInFlight.current.add(id);
+    setBusyResourceIds([...actionsInFlight.current]);
+    return true;
+  };
+  const finishAction = (id: string) => {
+    actionsInFlight.current.delete(id);
+    setBusyResourceIds([...actionsInFlight.current]);
+  };
   const [cancelReservation] = useCancelReservationMutation();
   const [completeReservation] = useCompleteReservationMutation();
   const [cancelAllReservations] = useCancelAllReservationsMutation();
-  const { data: userReservations, isLoading: isUserReservationsLoading } =
+  const { data: userReservations, isLoading: isUserReservationsLoading,
+    isFetching: isUserReservationsFetching, error: userReservationsError, refetch: refetchReservations } =
     useGetUserReservationsQuery();
   const safeUserReservations = userReservations || [];
-  const [, { isLoading: isUpdating }] = useUpdateResourceMutation();
 
   const [isAddResourcePopupOpen, setIsAddResourcePopupOpen] = useState(false);
   const [createResource] = useCreateResourceMutation();
@@ -113,8 +122,8 @@ const ResourceList = () => {
     );
   }, [resourcesWithStatus, selectedSpaceId]);
 
-  useMemo(() => {
-    if (!selectedSpaceId && spaces && spaces.length > 0) {
+  useEffect(() => {
+    if (spaces && spaces.length > 0 && !spaces.some((space) => space.id === selectedSpaceId)) {
       const defaultSpace = spaces.find((s) => s.name === "Default Space");
       if (defaultSpace) setSelectedSpaceId(defaultSpace.id);
       else setSelectedSpaceId(spaces[0].id);
@@ -126,35 +135,26 @@ const ResourceList = () => {
       (r) => r.resource.id === resourceId,
     );
     if (resource) {
+      reservationAttempt.current = null;
       setReservationResource({ id: resourceId, name: resource.resource.name });
     }
   };
 
-  const handleConfirmReservation = async (duration: string | null) => {
+  const handleConfirmReservation = async (options: ReservationOptions) => {
     if (!reservationResource) return;
-
-    try {
-      if (duration) {
-        await createTimedReservation({
-          resourceId: reservationResource.id,
-          duration,
-        }).unwrap();
-      } else {
-        await createReservation({
-          resourceId: reservationResource.id,
-        }).unwrap();
-      }
-      setReservationResource(null);
-      refetchResources();
-      showNotification("success", t("common:status.success"));
-    } catch (e) {
-      const err = e as { data?: { error?: string }; message?: string };
-      console.error("Error creating reservation:", err);
-      showNotification(
-        "error",
-        `Error creating reservation: ${err?.data?.error || err.message || "Unknown error"}`,
-      );
+    const request = { resourceId: reservationResource.id, ...options };
+    const fingerprint = JSON.stringify(request);
+    if (reservationAttempt.current?.fingerprint !== fingerprint) {
+      reservationAttempt.current = { fingerprint, key: crypto.randomUUID() };
     }
+    const reservation = await claimReservation({
+      request, idempotencyKey: reservationAttempt.current.key,
+    }).unwrap();
+    refetchResources();
+    showNotification("success", t(reservation.status === "pending"
+      ? "components:resourceList.queuedSuccess" : "components:resourceList.reservedSuccess", {
+      position: reservation.queuePosition,
+    }));
   };
 
   const handleRelease = async (resourceId: string) => {
@@ -170,7 +170,7 @@ const ResourceList = () => {
         (res.status === "active" || res.status === "pending"),
     );
 
-    if (userReservation) {
+    if (userReservation && startAction(resourceId)) {
       try {
         if (userReservation.status === "active") {
           // Complete active reservation
@@ -186,8 +186,10 @@ const ResourceList = () => {
         console.error("Error releasing reservation:", err);
         showNotification(
           "error",
-          `Error releasing reservation: ${err?.data?.error || err.message || "Unknown error"}`,
+          t("components:resourceList.releaseError", { detail: err?.data?.error || err.message || t("common:errors.generic") }),
         );
+      } finally {
+        finishAction(resourceId);
       }
     }
   };
@@ -202,6 +204,7 @@ const ResourceList = () => {
   };
 
   const handleDelete = async (resourceId: string) => {
+    if (!startAction(resourceId)) return;
     try {
       await deleteResource(resourceId).unwrap();
       showNotification("success", t("common:status.success"));
@@ -213,6 +216,8 @@ const ResourceList = () => {
         `Error deleting resource: ${err?.data?.error || err.message || "Unknown error"}`,
       );
       return;
+    } finally {
+      finishAction(resourceId);
     }
   };
 
@@ -278,9 +283,6 @@ const ResourceList = () => {
     }
   };
 
-  const isLoadingAny =
-    isFetching || isUserReservationsLoading || isUpdating || isDeleting;
-
   return (
     <div className="flex bg-slate-950 min-h-screen overflow-x-hidden">
       {/* Spaces Sidebar */}
@@ -306,13 +308,14 @@ const ResourceList = () => {
         </div>
       </div>
 
-      {/* Mobile Space Selector */}
+      <div className="p-4 sm:p-6 w-full min-w-0">
       {spaces && spaces.length > 0 && (
         <div className="md:hidden mb-6">
-          <label className="block text-sm font-medium text-slate-400 mb-2">
+          <label htmlFor="mobile-space" className="block text-sm font-medium text-slate-400 mb-2">
             {t("pages:home.spaces")}
           </label>
           <select
+            id="mobile-space"
             value={selectedSpaceId || ""}
             onChange={(e) => setSelectedSpaceId(e.target.value)}
             className="w-full bg-slate-800/50 border border-slate-700/50 rounded-lg px-4 py-3 text-slate-200 focus:outline-none focus:border-cyan-500 transition-colors"
@@ -326,16 +329,21 @@ const ResourceList = () => {
         </div>
       )}
 
-      <div className="p-6 w-full min-w-0">
         {apiError && (
-          <div className="glass-panel p-4 rounded-xl border-brand-busy/20 bg-brand-busy/5 mb-6 text-center">
+          <div role="alert" className="glass-panel p-4 rounded-xl border-brand-busy/20 bg-brand-busy/5 mb-6 text-center">
             <p className="text-brand-busy font-medium">
               {t("pages:home.fetchError")}
             </p>
+            <button type="button" onClick={() => refetchResources()} className="underline p-2">{t("common:refresh")}</button>
           </div>
         )}
 
-        <div className="flex items-center justify-between mb-6">
+        {userReservationsError && <div role="alert" className="text-red-400 mb-4">
+          <p>{t("pages:home.reservationsError")}</p>
+          <button type="button" onClick={() => refetchReservations()} className="underline p-2">{t("common:refresh")}</button>
+        </div>}
+
+        <div className="flex flex-wrap gap-4 items-center justify-between mb-6">
           <div>
             <h2 className="text-2xl font-bold text-white tracking-tight">
               {t("pages:home.title")}
@@ -354,8 +362,11 @@ const ResourceList = () => {
           )}
         </div>
 
-        {isLoadingAny ? (
-          <div className="flex flex-col items-center justify-center p-20 glass-panel rounded-xl">
+        {(isFetching || isUserReservationsFetching) && !isLoading && (
+          <p role="status" className="text-sm text-slate-400 mb-3">{t("pages:home.refreshingResources")}</p>
+        )}
+        {isLoading && resourcesWithStatus.length === 0 ? (
+          <div role="status" className="flex flex-col items-center justify-center p-20 glass-panel rounded-xl">
             <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-brand-queued mb-4"></div>
             <p className="text-slate-400 font-medium">
               {t("pages:home.loadingResources")}
@@ -372,6 +383,8 @@ const ResourceList = () => {
             onCancelAll={handleCancelAll}
             onMaintenanceToggle={isAdmin ? handleMaintenanceToggle : undefined}
             isAdmin={isAdmin}
+            busyResourceIds={busyResourceIds}
+            reservationsReady={!isUserReservationsLoading && !isUserReservationsFetching && !userReservationsError}
           />
         )}
 

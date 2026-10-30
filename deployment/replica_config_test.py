@@ -74,7 +74,7 @@ class ReplicaConfigTest(unittest.TestCase):
                 "entrypoint": ["sh", "-c", 'printf "%s" "$$DB_PASSWORD"'],
             }}}))
             result = subprocess.run([
-                "docker", "compose", "-f", str(config), "run", "--rm",
+                "docker", "--context", "default", "compose", "-f", str(config), "run", "--rm",
                 "--no-deps", "-T", "probe",
             ], capture_output=True, text=True, check=False)
             self.assertEqual(result.returncode, 0, result.stderr)
@@ -121,7 +121,7 @@ class ReplicaConfigTest(unittest.TestCase):
             "> /tmp/nginx.conf; nginx -t -c /tmp/nginx.conf"
         )
         result = subprocess.run([
-            "docker", "run", "--rm", "--network", "none",
+            "docker", "--context", "default", "run", "--rm", "--network", "none",
             "--entrypoint", "sh", "-e", "BACKEND_HOST=127.0.0.1",
             "-e", "BACKEND_PORT=3000", "-e",
             "TRUSTED_INGRESS_CIDR=127.0.0.1/32",

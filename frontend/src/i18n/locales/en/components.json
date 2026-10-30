@@ -19,6 +19,9 @@
     "queue": "Queue",
     "inQueue": "In Queue",
     "cancelAll": "Cancel All Reservations",
+    "reservedSuccess": "Reservation accepted. Check the current status below and release it when you are finished.",
+    "queuedSuccess": "Queue request accepted at submitted position {{position}}. Check the current status below; you can cancel from the resource actions.",
+    "releaseError": "Could not release the reservation: {{detail}}. Refresh to check its current state before retrying.",
     "maintenance": {
       "enable": "Enable Maintenance",
       "disable": "Disable Maintenance",
@@ -37,7 +40,18 @@
     "noData": "No resources found",
     "filterPlaceholder": "Filter names...",
     "queueActive": "Queue / Active",
-    "notConfigured": "Not configured"
+    "notConfigured": "Not configured",
+    "resources": "Resources and availability",
+    "health": "Health",
+    "toggleDetails": "Toggle details for {{name}}",
+    "runningFor": "Running for {{elapsed}}",
+    "queuePosition": "Your position: #{{position}}",
+    "states": {
+      "available": "Available",
+      "inUse": "In use",
+      "inUseByYou": "In use by you",
+      "queued": "You are queued"
+    }
   },
   "reservationModal": {
     "title": "Reserve {{resourceName}}",
@@ -45,7 +59,68 @@
     "durationPlaceholder": "e.g., 2h, 30m, 1d",
     "confirm": "Confirm Reservation",
     "timedReservation": "Timed Reservation",
-    "indefiniteReservation": "Indefinite Reservation"
+    "indefiniteReservation": "Indefinite Reservation",
+    "default": "Policy default",
+    "indefinite": "Indefinite",
+    "custom": "Custom",
+    "days": "Days",
+    "hours": "Hours",
+    "minutes": "Minutes",
+    "presets": {
+      "30m": "30 minutes",
+      "1h": "1 hour",
+      "4h": "4 hours",
+      "24h": "1 day"
+    },
+    "policy": "Default: {{defaultDuration}}. Maximum: {{maxDuration}}. Up to {{maxLiveClaims}} active or queued reservations.",
+    "policyError": "Could not load reservation policy. Refresh before reserving.",
+    "invalidDuration": "Enter whole, nonnegative values totaling more than zero and no more than {{maxDuration}}.",
+    "submitting": "Reserving…",
+    "errors": {
+      "conflict": "The resource availability or your reservation quota changed. Refresh the resources or release an existing reservation before retrying.",
+      "forbidden": "You no longer have permission to reserve this resource. Contact your administrator.",
+      "invalid": "The duration is not allowed by the current policy. Choose a shorter duration or use the policy default.",
+      "failed": "The reservation could not be confirmed. Retry with the same selection to safely check or complete this request."
+    }
+  },
+  "healthStatus": {
+    "healthy": "Healthy",
+    "degraded": "Degraded",
+    "down": "Down",
+    "unknown": "Unknown",
+    "notConfigured": "Health check not configured",
+    "status": "Status: {{status}}",
+    "responseTime": "Response time: {{milliseconds}}ms",
+    "checkedAt": "Last checked: {{elapsed}}",
+    "error": "Error: {{error}}",
+    "justNow": "Just now",
+    "minutesAgo": "{{count}}m ago",
+    "hoursAgo": "{{count}}h ago",
+    "daysAgo": "{{count}}d ago"
+  },
+  "queueModal": {
+    "title": "Queue for {{resourceName}}",
+    "error": "Could not refresh the queue. Displayed entries may be stale. Please try again.",
+    "empty": "No active reservations or queue.",
+    "unknownUser": "Unknown user",
+    "position": "Position #{{position}}",
+    "joined": "Joined {{elapsed}} ago",
+    "started": "Started {{elapsed}} ago",
+    "duration": "Duration: {{duration}}"
+  },
+  "resourceFilters": {
+    "tags": "Filter by labels",
+    "types": "Filter by types",
+    "remove": "Remove {{value}}",
+    "clearAll": "Clear all",
+    "clearTags": "Clear all labels",
+    "clearTypes": "Clear all types",
+    "noTags": "No labels available",
+    "noTypes": "No types available",
+    "selectedTags_one": "{{count}} label selected",
+    "selectedTags_other": "{{count}} labels selected",
+    "selectedTypes_one": "{{count}} type selected",
+    "selectedTypes_other": "{{count}} types selected"
   },
   "confirmationModal": {
     "cancelAllTitle": "Cancel All Reservations",

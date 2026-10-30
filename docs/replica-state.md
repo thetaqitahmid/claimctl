@@ -215,7 +215,7 @@ and never applies a release or starts a database.
 ## Focused validation
 
 Run backend tests with `SECURITY_TEST_DATABASE_URL` pointing ONLY to an owned
-loopback PostgreSQL cluster on55432/55433. The helper creates and drops isolated
+loopback PostgreSQL cluster on ports 55432/55433. The helper creates and drops isolated
 UUID-named databases. Real replica tests cover two independent pools/apps and
 full `NewServer` router/worker instances sharing login, CSRF and signing keys,
 delayed commits, rollback, scoped deletion, hidden-space suppression, token
@@ -224,7 +224,8 @@ retention/overflow,
 CSRF expiry/outage, atomic limiter concurrency and concurrent key startup.
 
 `TestReplicaNginxTLSIngressAndSSERealDatabase` also needs Docker and an already
-available `nginx:alpine` image. It uses a disposable loopback Nginx container,
+available `nginx:alpine` image on Docker's local `default` context. It uses a
+disposable loopback Nginx container,
 no named volumes, and verifies actual API routing, trusted/untrusted ingress
 origin behavior and receipt of a tiny SSE frame before stream completion.
 
@@ -235,5 +236,9 @@ python3 deployment/replica_config_test.py
 sh deployment/postgres-preflight_test.sh
 ```
 
-These checks need Docker plus `nginx:alpine` and `postgres:18.1-alpine` images.
-No production compose startup, upgrade or deployment is part of validation.
+These checks need Docker plus local `nginx:alpine` and `postgres:18.1-alpine`
+images. Container checks explicitly select the local `default` context rather
+than the operator's selected remote context. No production compose startup,
+upgrade or deployment is part of validation. See
+[release validation](VALIDATION.md) for the complete integration, migration,
+browser, and CLI check sequence.

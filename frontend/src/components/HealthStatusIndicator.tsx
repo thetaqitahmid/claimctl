@@ -1,4 +1,5 @@
 import React from 'react';
+import { useTranslation } from 'react-i18next';
 import { HealthStatus } from '../types';
 
 interface HealthStatusIndicatorProps {
@@ -15,18 +16,8 @@ const HealthStatusIndicator: React.FC<HealthStatusIndicatorProps> = ({
   checkedAt,
   errorMessage,
 }) => {
-  const getStatusLabel = () => {
-    switch (status) {
-      case 'healthy':
-        return 'Healthy';
-      case 'degraded':
-        return 'Degraded';
-      case 'down':
-        return 'Down';
-      default:
-        return 'Unknown';
-    }
-  };
+  const { t } = useTranslation('components');
+  const getStatusLabel = () => t(`healthStatus.${status || 'unknown'}`);
 
   const getBadgeClass = () => {
     switch (status) {
@@ -47,31 +38,31 @@ const HealthStatusIndicator: React.FC<HealthStatusIndicatorProps> = ({
     const diffMs = now.getTime() - date.getTime();
     const diffMins = Math.floor(diffMs / 60000);
 
-    if (diffMins < 1) return 'Just now';
-    if (diffMins < 60) return `${diffMins}m ago`;
+    if (diffMins < 1) return t('healthStatus.justNow');
+    if (diffMins < 60) return t('healthStatus.minutesAgo', { count: diffMins });
     const diffHours = Math.floor(diffMins / 60);
-    if (diffHours < 24) return `${diffHours}h ago`;
+    if (diffHours < 24) return t('healthStatus.hoursAgo', { count: diffHours });
     const diffDays = Math.floor(diffHours / 24);
-    return `${diffDays}d ago`;
+    return t('healthStatus.daysAgo', { count: diffDays });
   };
 
   const getTooltipContent = () => {
-    if (!status) return 'Health check not configured';
+    if (!status) return t('healthStatus.notConfigured');
 
     const parts = [
-      `Status: ${getStatusLabel()}`,
+      t('healthStatus.status', { status: getStatusLabel() }),
     ];
 
-    if (responseTimeMs) {
-      parts.push(`Response time: ${responseTimeMs}ms`);
+    if (responseTimeMs != null) {
+      parts.push(t('healthStatus.responseTime', { milliseconds: responseTimeMs }));
     }
 
     if (checkedAt) {
-      parts.push(`Last checked: ${formatTimestamp(checkedAt)}`);
+      parts.push(t('healthStatus.checkedAt', { elapsed: formatTimestamp(checkedAt) }));
     }
 
     if (errorMessage) {
-      parts.push(`Error: ${errorMessage}`);
+      parts.push(t('healthStatus.error', { error: errorMessage }));
     }
 
     return parts.join('\n');

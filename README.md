@@ -66,6 +66,9 @@ The core workflow is **claim, wait, use, and release**, not a calendar for
 booking future time slots. See [Reservations & Queues](docs/RESERVATIONS.md)
 for lifecycle details.
 
+See [release validation](docs/VALIDATION.md) for standard checks, disposable
+database integration tests, deployment fixtures, and browser acceptance.
+
 ## Capabilities
 
 | Area | Available capabilities |

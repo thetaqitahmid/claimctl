@@ -10,7 +10,7 @@ check() {
     expected=$2
     pgdata=${3:-/var/lib/postgresql/18/docker}
     mkdir -p "$fixtures/$name"
-    if docker run --rm --network none \
+    if docker --context default run --rm --network none \
         --entrypoint /usr/local/bin/claimctl-postgres-preflight \
         -e "PGDATA=$pgdata" \
         -v "$base/deployment/postgres-preflight.sh:/usr/local/bin/claimctl-postgres-preflight:ro" \

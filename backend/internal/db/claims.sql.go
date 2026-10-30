@@ -14,6 +14,9 @@ import (
 const countLiveClaims = `-- name: CountLiveClaims :one
 SELECT COUNT(*) FROM claimctl.reservations
 WHERE user_id=$1 AND status IN ('active', 'pending')
+  AND (lease_expires_at IS NULL OR lease_expires_at > statement_timestamp())
+  AND (hard_end_time IS NULL OR hard_end_time > statement_timestamp())
+  AND (scheduled_end_time IS NULL OR scheduled_end_time > statement_timestamp())
 `
 
 func (q *Queries) CountLiveClaims(ctx context.Context, userID uuid.UUID) (int64, error) {

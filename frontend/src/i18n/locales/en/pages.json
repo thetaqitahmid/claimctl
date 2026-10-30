@@ -18,7 +18,9 @@
     "spaces": "Spaces",
     "addResource": "Add Resource",
     "loadingResources": "Loading resources...",
-    "fetchError": "Failed to fetch resources"
+    "fetchError": "Failed to fetch resources. Previously loaded availability may be out of date.",
+    "reservationsError": "Could not load your reservations. Reservation actions are disabled until you refresh successfully.",
+    "refreshingResources": "Refreshing availability…"
   },
   "admin": {
     "title": "Admin Panel",

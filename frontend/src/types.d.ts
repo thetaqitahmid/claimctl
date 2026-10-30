@@ -60,6 +60,18 @@ export interface UserProps {
   authProvider?: string;
 }
 
+export interface ReservationPolicy {
+  defaultDuration: string;
+  maxDuration: string;
+  maxLiveClaims: number;
+  allowIndefinite: boolean;
+}
+
+export interface ReservationOptions {
+  duration?: string;
+  indefinite?: boolean;
+}
+
 export interface UserReservation {
     id: string;
     resourceId: string;

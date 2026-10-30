@@ -14,6 +14,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
+
 	"github.com/thetaqitahmid/claimctl/internal/db"
 	"github.com/thetaqitahmid/claimctl/internal/utils"
 )
@@ -189,14 +190,14 @@ func (s *reservationService) Claim(ctx context.Context, userID uuid.UUID, req Cl
 					continue
 				}
 			}
+			if e = reclaimAndPromote(ctx, q, candidate.ID); e != nil {
+				return e
+			}
 			_, e = q.FindUserReservationForResource(ctx, db.FindUserReservationForResourceParams{UserID: userID, ResourceID: candidate.ID})
 			if e == nil {
 				continue
 			}
 			if !errors.Is(e, pgx.ErrNoRows) {
-				return e
-			}
-			if e = reclaimAndPromote(ctx, q, candidate.ID); e != nil {
 				return e
 			}
 			live, e := q.GetQueueForResource(ctx, candidate.ID)

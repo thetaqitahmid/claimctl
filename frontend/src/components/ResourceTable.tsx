@@ -43,6 +43,8 @@ interface ResourceTableProps {
   onCancelAll?: (resourceId: string) => void;
   onMaintenanceToggle?: (resourceId: string, resourceName: string, currentState: boolean) => void;
   isAdmin: boolean;
+  busyResourceIds?: string[];
+  reservationsReady?: boolean;
 }
 
 const columnHelper = createColumnHelper<ResourceWithStatus>();
@@ -57,6 +59,8 @@ const ResourceTable = ({
   onCancelAll,
   onMaintenanceToggle,
   isAdmin,
+  busyResourceIds = [],
+  reservationsReady = true,
 }: ResourceTableProps) => {
   const { t } = useTranslation(["components", "common"]);
   const [sorting, setSorting] = useState<SortingState>([]);
@@ -90,6 +94,8 @@ const ResourceTable = ({
           return row.getCanExpand() ? (
             <button
               onClick={row.getToggleExpandedHandler()}
+              aria-expanded={row.getIsExpanded()}
+              aria-label={t("components:resourceTable.toggleDetails", { name: row.original.resource.name })}
               className="text-slate-400 hover:text-white transition-colors p-1"
             >
               {row.getIsExpanded() ? (
@@ -113,6 +119,7 @@ const ResourceTable = ({
                 <ArrowUpDown className="w-4 h-4" />
               </button>
               <input
+                 aria-label={t("components:resourceTable.filterPlaceholder")}
                  placeholder={t("components:resourceTable.filterPlaceholder")}
                  value={(column.getFilterValue() as string) ?? ""}
                  onChange={(event) => column.setFilterValue(event.target.value)}
@@ -209,10 +216,11 @@ const ResourceTable = ({
                 (res) => res.resourceId === row.resource.id &&
                 (res.status === 'active' || res.status === 'pending')
             );
-            if (userReservation?.status === 'active') return 'In Use (You)';
-            if (userReservation?.status === 'pending') return 'Queued';
-            if (row.activeReservations > 0) return 'In Use';
-            return 'Available';
+            if (row.resource.isUnderMaintenance) return "maintenance";
+            if (userReservation?.status === 'active') return 'inUseByYou';
+            if (userReservation?.status === 'pending') return 'queued';
+            if (row.activeReservations > 0) return 'inUse';
+            return 'available';
         },
         {
           id: "status",
@@ -241,17 +249,17 @@ const ResourceTable = ({
             }
 
             let badgeClass = "badge-available";
-            if (status.includes("In Use")) badgeClass = "badge-busy";
-            if (status.includes("Queued")) badgeClass = "badge-queued";
-            if (status.includes("(You)")) badgeClass = "badge-available shadow-[0_0_10px_rgba(16,185,129,0.2)]";
+            if (status === "inUse") badgeClass = "badge-busy";
+            if (status === "queued") badgeClass = "badge-queued";
+            if (status === "inUseByYou") badgeClass = "badge-available shadow-[0_0_10px_rgba(16,185,129,0.2)]";
 
-            return <span className={`badge ${badgeClass}`}>{status}</span>;
+            return <span className={`badge ${badgeClass}`}>{t(`components:resourceTable.states.${status}`)}</span>;
           },
         }
       ),
       columnHelper.display({
         id: "health_status",
-        header: "Health",
+        header: t("components:resourceTable.health"),
         cell: (info) => {
           const row = info.row.original;
           const healthStatus = row.healthStatus;
@@ -300,8 +308,8 @@ const ResourceTable = ({
                      </button>
                      {row.activeReservationStartTime && (
                          <span className="text-[10px] text-emerald-400/80 pl-4">
-                             Running for {formatDistanceToNow(row.activeReservationStartTime * 1000)}
-                             {` (for ${row.activeReservationDuration || 'indefinite'})`}
+                             {t("components:resourceTable.runningFor", { elapsed: formatDistanceToNow(row.activeReservationStartTime * 1000) })}
+                             {` (${row.activeReservationDuration || t("components:reservationModal.indefinite")})`}
                          </span>
                      )}
                    </div>
@@ -311,13 +319,13 @@ const ResourceTable = ({
                        onClick={() => setSelectedQueueResource({ id: row.resource.id, name: row.resource.name })}
                        className="flex items-center text-amber-500 gap-1 hover:text-amber-400 transition-colors"
                      >
-                     <Clock className="h-3 h-3" />
+                     <Clock className="w-3 h-3" />
                       {row.queueLength} {t("components:resourceList.inQueue")}
                      </button>
                  )}
                  {userReservation?.status === 'pending' && userReservation.queuePosition > 0 && (
                      <div className="text-cyan-400 text-xs pl-4">
-                        Pos: #{userReservation.queuePosition}
+                        {t("components:resourceTable.queuePosition", { position: userReservation.queuePosition })}
                      </div>
                  )}
                  </div>
@@ -335,6 +343,8 @@ const ResourceTable = ({
               (res.status === "active" || res.status === "pending")
           );
           const isUnderMaintenance = resource.resource.isUnderMaintenance;
+          const isBusy = busyResourceIds.includes(resource.resource.id);
+          const reservationDisabled = isBusy || !reservationsReady;
 
           const handleAction = () => {
              if (userReservation) {
@@ -345,9 +355,11 @@ const ResourceTable = ({
           };
 
           return (
-            <div className="flex items-center gap-1 flex-wrap">
+            <div className="flex items-center gap-2 flex-wrap [&_button]:min-h-10 [&_button]:min-w-10 [&_button]:flex [&_button]:items-center [&_button]:justify-center [&_button:disabled]:opacity-50 [&_button:disabled]:cursor-not-allowed">
+              {isBusy && <span role="status" className="sr-only">{t("common:loading")}</span>}
                  {userReservation?.status === 'active' ? (
                     <button
+                     disabled={reservationDisabled}
                      onClick={handleAction}
                       title={t("components:resourceList.release")}
                      className="p-1.5 rounded bg-brand-available/10 text-brand-available hover:bg-brand-available/20 border border-brand-available/20 transition-all"
@@ -356,6 +368,7 @@ const ResourceTable = ({
                    </button>
                  ) : userReservation?.status === 'pending' ? (
                      <button
+                      disabled={reservationDisabled}
                       onClick={handleAction}
                       title={t("common:cancel")}
                      className="p-1.5 rounded bg-brand-busy/10 text-brand-busy hover:bg-brand-busy/20 border border-brand-busy/20 transition-all"
@@ -365,7 +378,7 @@ const ResourceTable = ({
                 ) : (
                      <button
                          onClick={handleAction}
-                         disabled={isUnderMaintenance}
+                         disabled={isUnderMaintenance || reservationDisabled}
                          title={isUnderMaintenance ? t("common:status.maintenance") : (resource.activeReservations > 0 ? t("components:resourceList.queue") : t("components:resourceList.reserve"))}
                         className={`p-1.5 rounded transition-all border ${
                             isUnderMaintenance
@@ -391,6 +404,7 @@ const ResourceTable = ({
                 <>
                   {(resource.activeReservations > 0 || resource.queueLength > 0) && onCancelAll && (
                     <button
+                      disabled={isBusy}
                       onClick={() => onCancelAll(resource.resource.id)}
                       className="p-1.5 rounded bg-red-500/10 text-red-500 hover:bg-red-500/20 border border-red-500/20 transition-all"
                       title={t("components:resourceList.cancelAll")}
@@ -400,6 +414,7 @@ const ResourceTable = ({
                   )}
                   {onMaintenanceToggle && (
                     <button
+                      disabled={isBusy}
                       onClick={() => onMaintenanceToggle(resource.resource.id, resource.resource.name, !!resource.resource.isUnderMaintenance)}
                       className={`p-1.5 rounded transition-all border ${
                         resource.resource.isUnderMaintenance
@@ -412,6 +427,7 @@ const ResourceTable = ({
                     </button>
                   )}
                   <button
+                    disabled={isBusy}
                     onClick={() => onDelete(resource.resource.id)}
                     className="p-1.5 rounded bg-brand-busy/10 text-brand-busy hover:bg-brand-busy/20 border border-brand-busy/20 transition-all"
                     title={t("components:resourceList.delete")}
@@ -425,7 +441,7 @@ const ResourceTable = ({
         },
       }),
     ],
-    [userReservations, uniqueTypes, onReserve, onRelease, onView, onCancelAll, onDelete, onMaintenanceToggle, isAdmin, uniqueTags, t]
+    [userReservations, uniqueTypes, onReserve, onRelease, onView, onCancelAll, onDelete, onMaintenanceToggle, isAdmin, busyResourceIds, reservationsReady, uniqueTags, t]
   );
 
   const table = useReactTable({
@@ -449,12 +465,12 @@ const ResourceTable = ({
   return (
     <div className="w-full space-y-6 min-w-0">
       <div className="w-full rounded-xl glass-panel">
-        <table className="w-full text-left text-sm block xl:table">
+        <table role="table" aria-label={t("components:resourceTable.resources")} className="w-full text-left text-sm block xl:table">
             <thead className="block xl:table-header-group">
               {table.getHeaderGroups().map((headerGroup) => (
                 <tr key={headerGroup.id} className="border-b border-slate-800/50 bg-slate-900/50 flex flex-col xl:table-row p-4 xl:p-0 gap-3 xl:gap-0">
                   {headerGroup.headers.map((header) => (
-                    <th key={header.id} className="px-2 xl:px-4 py-1 xl:py-3 font-semibold text-slate-300 uppercase tracking-wider text-[11px] block xl:table-cell">
+                    <th key={header.id} scope="col" aria-sort={header.column.getIsSorted() === "asc" ? "ascending" : header.column.getIsSorted() === "desc" ? "descending" : undefined} className="px-2 xl:px-4 py-1 xl:py-3 font-semibold text-slate-300 uppercase tracking-wider text-[11px] block xl:table-cell">
                       {header.isPlaceholder
                         ? null
                         : flexRender(
@@ -481,13 +497,12 @@ const ResourceTable = ({
                   >
                     {row.getVisibleCells().map((cell) => {
                       const id = cell.column.id;
-                      const label = id === 'resource_name' ? 'Name' :
-                                    id === 'resource_type' ? 'Type' :
-                                    id === 'resource_labels' ? 'Labels' :
-                                    id === 'status' ? 'Status' :
-                                    id === 'health_status' ? 'Health' :
-                                    id === 'queue_info' ? 'Queue' :
-                                    id === 'actions' ? 'Actions' : '';
+                      const labelKey = id === 'resource_name' ? 'name' :
+                                    id === 'resource_type' ? 'type' :
+                                    id === 'resource_labels' ? 'labels' :
+                                    id === 'health_status' ? 'health' :
+                                    id === 'queue_info' ? 'queueActive' : id;
+                      const label = id === 'expander' ? '' : t(`components:resourceTable.${labelKey}`);
                       return (
                       <td key={cell.id} className="px-4 py-3 xl:whitespace-nowrap align-middle block xl:table-cell border-b border-slate-800/30 xl:border-0 last:border-0">
                         {id !== 'expander' && <div className="xl:hidden text-[10px] text-slate-500 font-semibold mb-1.5 uppercase tracking-wider">{label}</div>}

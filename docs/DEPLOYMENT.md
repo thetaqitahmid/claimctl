@@ -11,8 +11,8 @@ claimctl is designed to be easily deployed using Docker and Docker Compose.
 ## Quick Start (Development)
 
 Run these commands from the repository root. Source development requires
-Go, Node.js with npm, Bash 4.3 or later, OpenSSL, Make, Docker Engine, and the
-Docker Compose plugin.
+Go, Node.js with npm, Bash 4.3 or later, OpenSSL, curl, the PostgreSQL client
+(`psql`), Make, Docker Engine, and the Docker Compose plugin.
 
 ```bash
 make dev_up
@@ -27,7 +27,7 @@ The command starts PostgreSQL using `tests/db/postgres-compose.yaml`, waits
 for its health check, installs frontend dependencies when needed, and builds
 the backend. The backend applies migrations to the database configured in
 `backend/.env` and creates the initial administrator and default space.
-Startup does not insert mock data or require the `migrate` or `psql` CLIs.
+Once the backend is ready, demo spaces and resources are seeded automatically.
 
 The services are available at:
 
@@ -118,10 +118,24 @@ environments.
 
 ### Seeding
 
-The development startup deliberately does not seed sample users, secrets,
-webhooks, or reservations. Create resources through the UI after signing in.
-The historical fixture in `tests/db-mock-data/seed.sql` is not run during
-startup and should not be applied to an existing development database.
+`make dev_up` seeds four spaces and 16 resources automatically. Repeated
+runs preserve existing records without duplicates. Use `make seed` to rerun
+it manually, then refresh the Resources page.
+
+### Indefinite reservations
+
+Indefinite reservations are supported but disabled by default. To enable
+the explicit Indefinite choice in the reservation dialog, add this to
+`backend/.env` and restart the backend:
+
+```bash
+RESERVATION_ALLOW_INDEFINITE=true
+```
+
+Omitting a reservation duration uses the server default of one hour, not
+an indefinite reservation. This policy is global, not specific to a
+resource. See [reservation claims](reservation-claims.md) for all policy
+options.
 
 ## Kubernetes Deployment (Helm)
 

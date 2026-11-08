@@ -1,4 +1,4 @@
-.PHONY: backend_up backend_down frontend_up frontend_deps dev_init dev_up dev_down db_up db_down test test_integration test_deployment test_cli_terminal test_dev_start helm_lint
+.PHONY: backend_up backend_down frontend_up frontend_deps dev_init dev_up dev_down db_up db_down test test_integration test_deployment test_cli_terminal test_dev_start helm_lint seed db_seed
 
 dev_init:
 	@bash deployment/dev-env.sh
@@ -28,6 +28,9 @@ dev_up:
 	@MAKE="$(MAKE)" bash deployment/dev-up.sh
 
 dev_down: backend_down
+
+seed db_seed: dev_init
+	@bash deployment/dev-seed.sh
 
 test_dev_start:
 	@python3 deployment/dev-start_test.py

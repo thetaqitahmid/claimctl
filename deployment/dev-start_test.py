@@ -18,7 +18,7 @@ class DevelopmentStartupTests(unittest.TestCase):
         self.root = Path(self.temporary.name)
         for directory in ("backend", "frontend", "deployment", "bin"):
             (self.root / directory).mkdir()
-        for name in ("dev-env.sh", "dev-up.sh"):
+        for name in ("dev-env.sh", "dev-up.sh", "dev-seed.sh"):
             shutil.copy(ROOT / "deployment" / name, self.root / "deployment" / name)
         shutil.copy(ROOT / "backend/.env.example", self.root / "backend/.env.example")
         shutil.copy(ROOT / "Makefile", self.root / "Makefile")
@@ -84,12 +84,31 @@ class DevelopmentStartupTests(unittest.TestCase):
         self.assertIn("localhost:55432/custom", (self.root / "backend/migrate-arguments").read_text())
         self.assertNotIn("5432/devdb", (self.root / "backend/migrate-arguments").read_text())
 
+    def test_seed_uses_configured_database_and_stops_on_sql_failure(self):
+        (self.root / "backend/.env").write_text('DATABASE_URL="postgresql://custom:password@localhost:55432/custom"\n')
+        self.command("psql", 'printf "%s\\n" "$*" > seed-arguments\nexit 7\n')
+        result = self.run_make("seed")
+        self.assertNotEqual(result.returncode, 0)
+        arguments = (self.root / "seed-arguments").read_text()
+        self.assertIn("localhost:55432/custom", arguments)
+        self.assertIn("-X -v ON_ERROR_STOP=1 -f tests/db-mock-data/seed.sql", arguments)
+        self.assertNotIn("Demo spaces and resources are ready", result.stdout)
+
+    def test_seed_alias_reports_success_after_psql_succeeds(self):
+        (self.root / "backend/.env").write_text('DATABASE_URL="postgresql://localhost/devdb"\n')
+        self.command("psql", "exit 0\n")
+        result = self.run_make("db_seed")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("Demo spaces and resources are ready", result.stdout)
+
     def prepare_services(self, backend_body, frontend_body):
         frontend = self.root / "frontend"
         (frontend / "node_modules").mkdir()
         for name in ("package.json", "package-lock.json", "node_modules/.package-lock.json"):
             (frontend / name).write_text("{}")
         self.command("docker", "exit 0\n")
+        self.command("curl", "exit 0\n")
+        self.command("psql", "exit 0\n")
         self.command("go", 'cp ../backend-fixture main\nchmod +x main\n')
         (self.root / "backend-fixture").write_text("#!/usr/bin/env bash\n" + backend_body)
         self.command("node", frontend_body)
@@ -113,6 +132,29 @@ class DevelopmentStartupTests(unittest.TestCase):
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("43", result.stderr)
         self.assertTrue((self.root / "backend-stopped").exists())
+
+    def test_startup_seeds_after_backend_readiness(self):
+        self.prepare_services(
+            'trap \'exit 0\' TERM\nwhile true; do sleep 0.1; done\n',
+            'for attempt in {1..100}; do [[ -f ../seed-complete ]] && exit 44; sleep 0.02; done\nexit 45\n',
+        )
+        self.command("curl", 'printf "ready\\n" >> startup-order\n')
+        self.command("psql", 'printf "seed\\n" >> startup-order\ntouch seed-complete\n')
+        result = self.run_make("dev_up")
+        self.assertIn("44", result.stderr)
+        self.assertEqual((self.root / "startup-order").read_text().splitlines(), ["ready", "seed"])
+
+    def test_seed_failure_stops_both_services(self):
+        self.prepare_services(
+            'touch ../backend-started\ntrap \'touch ../backend-stopped; exit 0\' TERM\nwhile true; do sleep 0.1; done\n',
+            'touch ../frontend-started\ntrap \'touch ../frontend-stopped; exit 0\' TERM\nwhile true; do sleep 0.1; done\n',
+        )
+        self.command("curl", 'for attempt in {1..100}; do [[ -f backend-started && -f frontend-started ]] && exit 0; sleep 0.02; done\nexit 1\n')
+        self.command("psql", 'exit 7\n')
+        result = self.run_make("dev_up")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertTrue((self.root / "backend-stopped").exists())
+        self.assertTrue((self.root / "frontend-stopped").exists())
 
     def test_signal_stops_both_services(self):
         self.prepare_services(

@@ -69,10 +69,13 @@ jobs:
       - name: Package and push chart
         run: |
           REPO=$(echo "${{ github.repository }}" | tr '[:upper:]' '[:lower:]')
-          VERSION=$(grep '^version:' charts/claimctl/Chart.yaml | awk '{print $2}')
+          BASE_VER=$(cat BASE_VERSION | tr -d '\n')
+          TIMESTAMP=$(date -u +%Y%m%dT%H%M%SZ)
+          COMMIT=$(echo "${{ github.sha }}" | cut -c1-7)
+          VERSION="${BASE_VER}-${TIMESTAMP}-${COMMIT}"
 
           echo "Packaging claimctl chart version ${VERSION}"
-          helm package charts/claimctl --destination .helm-release
+          helm package charts/claimctl --version "${VERSION}" --destination .helm-release
 
           echo "Pushing chart to oci://ghcr.io/${REPO}/helm"
           helm push ".helm-release/claimctl-${VERSION}.tgz" "oci://ghcr.io/${REPO}/helm"

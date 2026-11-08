@@ -31,12 +31,6 @@ spec:
         {{- if include "claimctl.isManagedDatabaseSecret" . }}
         checksum/db-secret: {{ include (print $.Template.BasePath "/secret.yaml") . | sha256sum }}
         {{- end }}
-        {{- with .Values.releaseMetadata.timestamp }}
-        claimctl.io/deployed-at: {{ . | quote }}
-        {{- end }}
-        {{- with .Values.releaseMetadata.commit }}
-        claimctl.io/commit: {{ . | quote }}
-        {{- end }}
         {{- with .Values.backend.podAnnotations }}
         {{- toYaml . | nindent 8 }}
         {{- end }}

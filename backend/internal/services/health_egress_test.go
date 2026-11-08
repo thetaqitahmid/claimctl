@@ -30,6 +30,25 @@ func TestHealthEgress_ExplicitAllowlistAndMetadataDeny(t *testing.T) {
 	require.ErrorContains(t, err, "address denied")
 }
 
+func TestHealthEgress_WildcardPorts(t *testing.T) {
+	t.Setenv("HEALTH_CHECK_ALLOWED_CIDRS", "10.20.0.0/16")
+	t.Setenv("HEALTH_CHECK_ALLOWED_PORTS", "*")
+	policy, err := newHealthEgressPolicy()
+	require.NoError(t, err)
+	for _, port := range []string{"22", "80", "5432", "65535"} {
+		_, err = policy.addresses(context.Background(), "10.20.0.2", port)
+		require.NoError(t, err, port)
+	}
+	_, err = policy.addresses(context.Background(), "169.254.169.254", "80")
+	require.ErrorContains(t, err, "address denied")
+
+	t.Setenv("HEALTH_CHECK_ALLOWED_PORTS", "80,*")
+	policy, err = newHealthEgressPolicy()
+	require.NoError(t, err)
+	_, err = policy.addresses(context.Background(), "10.20.0.2", "5432")
+	require.NoError(t, err)
+}
+
 func TestHealthEgress_DNSRebindingAndMixedAnswers(t *testing.T) {
 	t.Setenv("HEALTH_CHECK_ALLOWED_CIDRS", "10.20.0.0/16")
 	t.Setenv("HEALTH_CHECK_ALLOWED_PORTS", "80")

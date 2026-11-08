@@ -18,6 +18,7 @@ import (
 type healthEgressPolicy struct {
 	networks []netip.Prefix
 	ports    map[string]bool
+	allPorts bool
 	resolve  func(context.Context, string) ([]netip.Addr, error)
 }
 
@@ -39,6 +40,10 @@ func newHealthEgressPolicy() (*healthEgressPolicy, error) {
 	for _, raw := range strings.Split(utils.GetEnv("HEALTH_CHECK_ALLOWED_PORTS", ""), ",") {
 		raw = strings.TrimSpace(raw)
 		if raw == "" {
+			continue
+		}
+		if raw == "*" {
+			p.allPorts = true
 			continue
 		}
 		port, err := strconv.Atoi(raw)
@@ -103,7 +108,7 @@ func healthTarget(checkType HealthCheckType, target string) (host, port string, 
 }
 
 func (p *healthEgressPolicy) addresses(ctx context.Context, host, port string) ([]netip.Addr, error) {
-	if port != "" && !p.ports[port] {
+	if port != "" && !p.allPorts && !p.ports[port] {
 		return nil, fmt.Errorf("health target port denied")
 	}
 	var ips []netip.Addr

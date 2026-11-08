@@ -26,9 +26,17 @@ spec:
       app.kubernetes.io/component: frontend
   template:
     metadata:
-      {{- with .Values.frontend.podAnnotations }}
+      {{- if or .Values.frontend.podAnnotations .Values.releaseMetadata.timestamp .Values.releaseMetadata.commit }}
       annotations:
+        {{- with .Values.frontend.podAnnotations }}
         {{- toYaml . | nindent 8 }}
+        {{- end }}
+        {{- with .Values.releaseMetadata.timestamp }}
+        claimctl.io/deployed-at: {{ . | quote }}
+        {{- end }}
+        {{- with .Values.releaseMetadata.commit }}
+        claimctl.io/commit: {{ . | quote }}
+        {{- end }}
       {{- end }}
       labels:
         app.kubernetes.io/name: {{ include "claimctl.name" . }}

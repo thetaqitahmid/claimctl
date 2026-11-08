@@ -151,7 +151,9 @@ HEALTH_CHECK_ALLOWED_PORTS=80,443,8080,22
 ```
 
 Use only the infrastructure subnets and ports the deployment actually monitors.
-Do not use universal allow rules. Loopback, link-local, unspecified, multicast,
+Do not use universal allow rules. A single `*` entry in
+`HEALTH_CHECK_ALLOWED_PORTS` allows every TCP/UDP port; it is intended for
+trusted lab setups only. Loopback, link-local, unspecified, multicast,
 cloud metadata addresses, and Azure's platform endpoint remain denied even
 when inside an allowed CIDR. IPv4-mapped IPv6 addresses are
 normalized before policy checks. Private infrastructure is supported through

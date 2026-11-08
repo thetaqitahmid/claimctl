@@ -17,6 +17,13 @@ imagePullSecrets: []
 nameOverride: ""
 fullnameOverride: ""
 
+releaseMetadata:
+  # Optional source metadata stamped onto workload pod templates so a running
+  # release can be traced to its build. Helm cannot derive these automatically;
+  # set them from CI, e.g. --set releaseMetadata.commit=$GIT_SHA.
+  timestamp: "" # e.g. 20260101T120000Z
+  commit: "" # e.g. 7fa9580
+
 serviceAccount:
   # Specifies whether a service account should be created
   # Required when keyGeneration.enabled is true (grants access to create the secret).
@@ -73,7 +80,13 @@ backend:
     capabilities:
       drop:
         - ALL
-  extraEnv: []
+  extraEnv:
+    # Health probes deny all targets unless CIDRs and ports are allowed. The
+    # wildcards below allow every target and port; restrict them in production.
+    - name: HEALTH_CHECK_ALLOWED_CIDRS
+      value: "0.0.0.0/0,::/0"
+    - name: HEALTH_CHECK_ALLOWED_PORTS
+      value: "*"
   waitForDb:
     enabled: true
     image:

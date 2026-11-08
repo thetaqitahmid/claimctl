@@ -38,6 +38,8 @@ keyGeneration:
   secretName: "" # Defaults to fullname-secret if empty
   keyName: "app-encryption-key"
 backend:
+  # Optional comma-separated CIDR allowlist for proxy peers. Empty disables
+  # proxy trust, so forwarded headers from untrusted peers are rejected.
   trustedProxyCIDRs: ""
   cookieSecure: true
   replicaCount: 1

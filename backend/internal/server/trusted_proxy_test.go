@@ -59,8 +59,28 @@ func TestTrustedProxyOriginAndSpoofing(t *testing.T) {
 			}
 		})
 	}
+	t.Setenv("TRUSTED_PROXY_CIDRS", "127.0.0.1/32,not-a-prefix")
+	app := fiber.New(fiber.Config{DisableStartupMessage: true})
+	app.Use(TrustedProxyMiddleware())
+	app.Get("/", func(c *fiber.Ctx) error { return c.SendStatus(200) })
+	address := replicaListener(t, app)
+	request := func() *http.Response {
+		req, err := http.NewRequest("GET", address, nil)
+		require.NoError(t, err)
+		req.Header.Set("X-Forwarded-For", "203.0.113.99")
+		resp, err := http.DefaultClient.Do(req)
+		require.NoError(t, err)
+		t.Cleanup(func() { resp.Body.Close() })
+		return resp
+	}
+	require.Equal(t, 200, request().StatusCode)
+
 	t.Setenv("TRUSTED_PROXY_CIDRS", "not-a-prefix")
-	require.Panics(t, func() { TrustedProxyMiddleware() })
+	app = fiber.New(fiber.Config{DisableStartupMessage: true})
+	app.Use(TrustedProxyMiddleware())
+	app.Get("/", func(c *fiber.Ctx) error { return c.SendStatus(200) })
+	address = replicaListener(t, app)
+	require.Equal(t, 400, request().StatusCode)
 }
 
 func TestCSRFMissingStorageFailsClosed(t *testing.T) {

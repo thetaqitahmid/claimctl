@@ -17,7 +17,7 @@ services:
       - DB_NAME=${DB_NAME:-claimctl}
       - SSL_MODE=disable
       - APP_ENCRYPTION_KEY=${APP_ENCRYPTION_KEY:?Set a shared 32-byte base64 encryption key}
-      - TRUSTED_PROXY_CIDRS=${TRUSTED_PROXY_CIDRS:?Set trusted proxy CIDRs explicitly}
+      - TRUSTED_PROXY_CIDRS=${TRUSTED_PROXY_CIDRS:-}
     depends_on:
       db:
         condition: service_healthy

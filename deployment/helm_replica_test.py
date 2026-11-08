@@ -53,10 +53,11 @@ class HelmReplicaTest(unittest.TestCase):
                 command + " -f charts/claimctl/ci/lint-values.yaml",
                 result.stdout)
 
-    def test_proxy_trust_is_required(self):
+    def test_proxy_trust_is_optional(self):
         result = self.render()
-        self.assertNotEqual(result.returncode, 0)
-        self.assertIn("backend.trustedProxyCIDRs is required", result.stderr)
+        backend = self.deployments(result)["fixture-claimctl-backend"]
+        environment = self.environment(backend)
+        self.assertEqual(environment["TRUSTED_PROXY_CIDRS"]["value"], "")
 
     def test_internal_backend_and_explicit_proxy_configuration(self):
         result = self.render(

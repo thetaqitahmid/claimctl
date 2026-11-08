@@ -1,6 +1,7 @@
 package server
 
 import (
+	"log/slog"
 	"net"
 	"net/netip"
 	"net/url"
@@ -26,12 +27,14 @@ func trustedProxy(addr string, cidrs []netip.Prefix) bool {
 func TrustedProxyMiddleware() fiber.Handler {
 	var cidrs []netip.Prefix
 	for _, raw := range strings.Split(utils.GetEnv("TRUSTED_PROXY_CIDRS", ""), ",") {
-		if strings.TrimSpace(raw) == "" {
+		raw = strings.TrimSpace(raw)
+		if raw == "" {
 			continue
 		}
-		cidr, err := netip.ParsePrefix(strings.TrimSpace(raw))
+		cidr, err := netip.ParsePrefix(raw)
 		if err != nil {
-			panic("invalid TRUSTED_PROXY_CIDRS")
+			slog.Warn("Ignoring invalid TRUSTED_PROXY_CIDRS entry", "entry", raw, "error", err)
+			continue
 		}
 		cidrs = append(cidrs, cidr)
 	}

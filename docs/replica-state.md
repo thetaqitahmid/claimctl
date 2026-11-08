@@ -109,9 +109,10 @@ a portability adaptation and was not part of this Linux deployment scope.
 
 ## Trusted proxy and external origin
 
-`TRUSTED_PROXY_CIDRS` is a comma-separated CIDR allowlist for immediate peers
-and trusted intermediary hops. Empty means no proxy trust. Invalid CIDRs fail
-startup. Untrusted immediate peers supplying forwarded headers receive400.
+`TRUSTED_PROXY_CIDRS` is an optional comma-separated CIDR allowlist for
+immediate peers and trusted intermediary hops. Empty means no proxy trust.
+Invalid entries are logged and ignored, leaving trust disabled for those
+entries. Untrusted immediate peers supplying forwarded headers receive400.
 Trusted requests accept only one `http`/`https` proto and a valid external
 host, rejecting malformed/comma-separated origins and unsupported `Forwarded`.
 Client-IP traversal proceeds right to left and stops at the first untrusted
@@ -144,8 +145,8 @@ backend away from their managed database. External database deployments need
 an explicit reviewed compose override, not a conflicting env-file URL.
 
 Production has NO database password fallback. Required values are
-`DB_PASSWORD`, `APP_ENCRYPTION_KEY`, `TRUSTED_PROXY_CIDRS` and
-`POSTGRES_PGDATA`.
+`DB_PASSWORD`, `APP_ENCRYPTION_KEY` and `POSTGRES_PGDATA`.
+`TRUSTED_PROXY_CIDRS` is optional; leave it unset when no proxy is used.
 Use `docker compose --env-file backend/.env -f docker-compose.prod.yaml config`
 to validate interpolation before any startup. Service `env_file` alone does
 not supply compose interpolation variables. Quote literal dollars appropriately
@@ -188,9 +189,10 @@ only with disposable fixtures; no user volume was mounted or modified.
 
 ## Helm replica configuration
 
-The chart requires explicit `backend.trustedProxyCIDRs`, including actual
-frontend pod peers and any ingress hops. There is no universally safe cluster
-CIDR default. Do not substitute `0.0.0.0/0` or `::/0`. With TLS ingress, set
+The chart accepts optional `backend.trustedProxyCIDRs`. When set, include the
+actual frontend pod peers and any ingress hops. There is no universally safe
+cluster CIDR default, so empty disables proxy trust. Do not substitute
+`0.0.0.0/0` or `::/0`. With TLS ingress, set
 `frontend.trustedIngressCIDR` to its observed peer network if API traffic passes
 through frontend Nginx. Default loopback trust does not trust remote ingress.
 

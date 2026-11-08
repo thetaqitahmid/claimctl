@@ -84,7 +84,6 @@ class ReplicaConfigTest(unittest.TestCase):
         valid = {
             "DB_PASSWORD": "synthetic",
             "APP_ENCRYPTION_KEY": base64.b64encode(bytes(32)).decode(),
-            "TRUSTED_PROXY_CIDRS": "172.30.0.0/24",
             "POSTGRES_PGDATA": "/var/lib/postgresql/18/docker",
         }
         for missing in valid:
@@ -94,6 +93,10 @@ class ReplicaConfigTest(unittest.TestCase):
                 result = self.compose("docker-compose.prod.yaml", overrides)
                 self.assertNotEqual(result.returncode, 0)
                 self.assertIn(missing, result.stderr)
+        result = self.compose("docker-compose.prod.yaml", valid)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        backend = json.loads(result.stdout)["services"]["backend"]
+        self.assertEqual(backend["environment"]["TRUSTED_PROXY_CIDRS"], "")
 
     def test_development_uses_disposable_port_and_safe_layout(self):
         result = self.compose("docker-compose-dev.yaml", {})

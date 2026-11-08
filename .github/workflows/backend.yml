@@ -70,7 +70,8 @@ jobs:
       - name: Build and push image
         run: |
           BASE_VER=$(cat BASE_VERSION | tr -d '\n')
-          TAG="${BASE_VER}-$(echo ${{ github.sha }} | cut -c1-7)"
+          TIMESTAMP=$(date -u +%Y%m%dT%H%M%SZ)
+          TAG="${BASE_VER}-${TIMESTAMP}-$(echo ${{ github.sha }} | cut -c1-7)"
           REPO=$(echo "${{ github.repository }}" | tr '[:upper:]' '[:lower:]')
           IMAGE="ghcr.io/${REPO}/backend"
 

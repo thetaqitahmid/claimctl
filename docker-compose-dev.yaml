@@ -5,7 +5,9 @@ services:
       - "3000:3000"
     environment:
       - DATABASE_URL=
-      - TRUSTED_PROXY_CIDRS=172.30.0.0/24
+      - TRUSTED_PROXY_CIDRS=0.0.0.0/0,::/0
+      - HEALTH_CHECK_ALLOWED_CIDRS=0.0.0.0/0,::/0
+      - HEALTH_CHECK_ALLOWED_PORTS=*
       - DB_HOST=db
       - DB_PORT=5432
       - DB_USER=devuser
@@ -45,7 +47,7 @@ services:
     environment:
       - BACKEND_HOST=backend
       - BACKEND_PORT=3000
-      - TRUSTED_INGRESS_CIDR=127.0.0.1/32
+      - TRUSTED_INGRESS_CIDR=0.0.0.0/0
     depends_on:
       backend:
         condition: service_healthy

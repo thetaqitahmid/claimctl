@@ -189,12 +189,11 @@ only with disposable fixtures; no user volume was mounted or modified.
 
 ## Helm replica configuration
 
-The chart accepts optional `backend.trustedProxyCIDRs`. When set, include the
-actual frontend pod peers and any ingress hops. There is no universally safe
-cluster CIDR default, so empty disables proxy trust. Do not substitute
-`0.0.0.0/0` or `::/0`. With TLS ingress, set
-`frontend.trustedIngressCIDR` to its observed peer network if API traffic passes
-through frontend Nginx. Default loopback trust does not trust remote ingress.
+The chart defaults `backend.trustedProxyCIDRs` to `0.0.0.0/0,::/0` and
+`frontend.trustedIngressCIDR` to `0.0.0.0/0` so bundled deployments work
+without extra proxy configuration. Restrict both to the actual frontend pod
+peers and ingress hops in production; trust-all lets any reachable peer spoof
+forwarded client and origin headers.
 
 Frontend proxy requests always use the internal backend Service and its actual
 port, never the public ingress hostname. The chart clears `DATABASE_URL` and

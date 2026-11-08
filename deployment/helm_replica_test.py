@@ -53,11 +53,15 @@ class HelmReplicaTest(unittest.TestCase):
                 command + " -f charts/claimctl/ci/lint-values.yaml",
                 result.stdout)
 
-    def test_proxy_trust_is_optional(self):
+    def test_proxy_trust_defaults_to_trust_all(self):
         result = self.render()
-        backend = self.deployments(result)["fixture-claimctl-backend"]
-        environment = self.environment(backend)
-        self.assertEqual(environment["TRUSTED_PROXY_CIDRS"]["value"], "")
+        deployments = self.deployments(result)
+        backend = self.environment(deployments["fixture-claimctl-backend"])
+        frontend = self.environment(deployments["fixture-claimctl-frontend"])
+        self.assertEqual(backend["TRUSTED_PROXY_CIDRS"]["value"],
+                         "0.0.0.0/0,::/0")
+        self.assertEqual(frontend["TRUSTED_INGRESS_CIDR"]["value"],
+                         "0.0.0.0/0")
 
     def test_internal_backend_and_explicit_proxy_configuration(self):
         result = self.render(

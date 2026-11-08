@@ -38,9 +38,10 @@ keyGeneration:
   secretName: "" # Defaults to fullname-secret if empty
   keyName: "app-encryption-key"
 backend:
-  # Optional comma-separated CIDR allowlist for proxy peers. Empty disables
-  # proxy trust, so forwarded headers from untrusted peers are rejected.
-  trustedProxyCIDRs: ""
+  # Comma-separated CIDR allowlist for proxy peers. Defaults to trusting all
+  # peers; restrict this to the actual frontend and ingress networks in
+  # production.
+  trustedProxyCIDRs: "0.0.0.0/0,::/0"
   cookieSecure: true
   replicaCount: 1
   strategy: {}
@@ -146,7 +147,9 @@ backend:
     failureThreshold: 3
 
 frontend:
-  trustedIngressCIDR: "127.0.0.1/32"
+  # CIDR allowed to supply X-Forwarded-Proto. Defaults to trusting all peers;
+  # restrict this to the actual ingress network in production.
+  trustedIngressCIDR: "0.0.0.0/0"
   replicaCount: 1
   strategy: {}
   revisionHistoryLimit: 10

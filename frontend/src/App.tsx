@@ -15,6 +15,7 @@ import ProtectedRoute from "./components/auth/ProtectedRoute";
 
 const Home = lazy(() => import("./pages/Home"));
 const LoginPage = lazy(() => import("./pages/Login"));
+const SetupPage = lazy(() => import("./pages/Setup"));
 const SpaceAccess = lazy(() => import("./pages/SpaceAccess"));
 const AdminPanel = lazy(() => import("./pages/AdminPanel"));
 const AdminSettings = lazy(() => import("./pages/AdminSettings"));
@@ -48,6 +49,7 @@ const router = createBrowserRouter(
     >
       <Route path="/" element={<Home />} />
       <Route path="/login" element={<LoginPage />} />
+      <Route path="/setup" element={<SetupPage />} />
       <Route path="/profile" element={<Profile />} />
       <Route element={<ProtectedRoute allowedRoles={["admin"]} />}>
         <Route path="/admin" element={<AdminLayout />}>

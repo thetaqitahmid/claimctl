@@ -5,3 +5,15 @@
   You can access the frontend via port-forwarding:
   kubectl port-forward svc/{{ include "claimctl.fullname" . }}-frontend 8080:80
 {{- end }}
+
+2. Create the first administrator:
+{{- if .Values.backend.setupToken }}
+  Open the application and enter the configured backend.setupToken value on the
+  first-run setup page.
+{{- else }}
+  If no administrator exists yet, the backend logs a one-time setup token:
+    kubectl logs -n {{ .Release.Namespace }} deploy/{{ include "claimctl.fullname" . }}-backend | grep setup_token
+  Enter that token on the first-run setup page. For multi-replica installs set
+  backend.setupToken so every replica accepts the same token, or bootstrap the
+  admin with ADMIN_EMAIL/ADMIN_PASSWORD via backend.extraEnv.
+{{- end }}

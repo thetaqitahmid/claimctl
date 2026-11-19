@@ -111,12 +111,20 @@ leaking resources outside the token's allowed spaces.
 
 ## Bootstrap and refresh recovery
 
-Only first-admin creation requires a strong `ADMIN_PASSWORD` of 8 to 72 bytes.
-Existing admins permit restart without that bootstrap environment variable.
-Missing or weak first-admin passwords fail startup; no generated secret is
-logged. Bootstrap does not reset or promote an existing account with the same
-email. Recover through a supervised offline database password reset using a
-fresh bcrypt hash and revoke that user's refresh sessions in the same
+First-admin creation accepts either a strong `ADMIN_PASSWORD` of 8 to 72 bytes
+set before startup, or the first-run setup UI. When `ADMIN_PASSWORD` is set but
+weak, startup fails. When it is unset, no admin is created at startup and the
+install enters setup mode instead.
+
+In setup mode the backend requires a one-time setup token to create the first
+administrator. Provide `SETUP_TOKEN` for automated or multi-replica installs;
+otherwise a token is generated per process start, kept in memory only, logged
+once to stdout, and written to `./keys/setup-token` with mode `0600` on a
+best-effort basis. The token is invalidated once any admin exists, and the
+admin-count check plus insert run in one transaction so only one setup request
+can succeed. Setup does not reset or promote an existing account with the same
+email. Recover accounts through a supervised offline database password reset
+using a fresh bcrypt hash and revoke that user's refresh sessions in the same
 transaction. Trusted OIDC administration requires an explicitly configured
 admin group, not an arbitrary email claim.
 

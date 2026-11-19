@@ -87,6 +87,13 @@ func SetupRoutes(ctx context.Context, app *fiber.App, dbConn *connection.DBConn,
 	healthCheckHandler := handlers.NewHealthCheckHandler(healthCheckService)
 	auditHandler := handlers.NewAuditHandler(auditService)
 
+	// First-run setup is only active while no administrator exists.
+	setupToken, err := PrepareSetupToken(ctx, dbQueries)
+	if err != nil {
+		slog.Warn("failed to prepare first-run setup token", "error", err)
+	}
+	setupHandler := handlers.NewSetupHandler(userService, setupToken)
+
 	// API group. All the routes in this group will have the prefix "/api"
 	api := app.Group("/api", DBMiddleware(dbConn))
 
@@ -114,6 +121,13 @@ func SetupRoutes(ctx context.Context, app *fiber.App, dbConn *connection.DBConn,
 			"status": "ok",
 		})
 	})
+
+	// First-run setup endpoints. Registered before bearer/CSRF/cookie auth so
+	// provisioning tools can call them directly; access is gated by the setup
+	// token and the admin-count check inside the service.
+	setupLimiter := AtomicRateLimiter(dbQueries, "setup", 5, time.Minute)
+	api.Get("/setup/status", setupHandler.GetStatus)
+	api.Post("/setup/admin", setupLimiter, setupHandler.CreateInitialAdmin)
 
 	// Register API Token Middleware BEFORE JWT
 	api.Use(BearerAuthentication(apiTokenService, dbQueries, publicKey))

@@ -18,7 +18,9 @@ trap 'rm -f "$temporary"' EXIT
 password="Dev1!$(openssl rand -hex 20)"
 encryption_key=$(openssl rand -base64 32)
 awk -v password="$password" -v encryption_key="$encryption_key" '
-    /^ADMIN_PASSWORD=/ { print "ADMIN_PASSWORD=\"" password "\""; next }
+    /^#? ?ADMIN_PASSWORD=/ { print "ADMIN_PASSWORD=\"" password "\""; next }
+    /^#? ?ADMIN_EMAIL=/ { print "ADMIN_EMAIL=\"admin@example.com\""; next }
+    /^#? ?ADMIN_USER=/ { print "ADMIN_USER=\"System Admin\""; next }
     /^APP_ENCRYPTION_KEY=/ { print "APP_ENCRYPTION_KEY=\"" encryption_key "\""; next }
     /^OIDC_[A-Z_]+=/ { print "# " $0; next }
     { print }

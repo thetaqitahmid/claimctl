@@ -16,6 +16,8 @@ services:
       - SSL_MODE=disable
       # - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4318
       # - APP_ENCRYPTION_KEY= # Set this to a 32-byte base64 string for production
+      # - SETUP_TOKEN= # Optional fixed first-run setup token; generated and logged when unset
+      # - ADMIN_PASSWORD= # Set to bootstrap the first admin instead of using the setup UI
       - ENABLE_CSRF=false
       - COOKIE_SECURE=false
       - COOKIE_SAMESITE=Lax

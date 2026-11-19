@@ -131,6 +131,10 @@ spec:
               value: {{ .Values.backend.trustedProxyCIDRs | quote }}
             - name: COOKIE_SECURE
               value: {{ .Values.backend.cookieSecure | quote }}
+            {{- if .Values.backend.setupToken }}
+            - name: SETUP_TOKEN
+              value: {{ .Values.backend.setupToken | quote }}
+            {{- end }}
             - name: DB_HOST
               value: {{ if .Values.postgres.enabled }}{{ include "claimctl.postgresHost" . | quote }}{{ else }}{{ .Values.db.host | quote }}{{ end }}
             - name: DB_PORT

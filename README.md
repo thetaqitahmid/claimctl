@@ -102,24 +102,32 @@ git clone https://github.com/thetaqitahmid/claimctl.git
 cd claimctl
 ```
 
-### 2. Set a bootstrap administrator password
+### 2. Create the first administrator
 
-In your shell, set a unique password before starting the application:
+You can either let the backend bootstrap an administrator from environment
+variables, or create it from the web UI on first launch.
+
+**Option A: create it from the UI (recommended for local evaluation)**
+
+Start the stack without `ADMIN_PASSWORD`:
+
+```bash
+docker compose -f docker-compose-dev.yaml up -d --build
+```
+
+The backend applies migrations and enters first-run setup mode. Retrieve the
+one-time setup token from the backend logs (or `backend/keys/setup-token`):
+
+```bash
+docker compose -f docker-compose-dev.yaml logs backend | grep setup_token
+```
+
+Open <http://localhost:5173>, enter the token, and create the administrator.
+
+**Option B: bootstrap from environment variables**
 
 ```bash
 export ADMIN_PASSWORD='ReplaceThisWithYourOwnStrongPassword1!'
-```
-
-Replace the example value. The password must contain 8 to 72 bytes, including
-uppercase and lowercase letters, a digit, and a supported special character
-such as `!`.
-
-### 3. Start the stack
-
-Run this command from the repository root. The inline Compose override
-passes the bootstrap credentials to the backend:
-
-```bash
 docker compose -f docker-compose-dev.yaml -f - up -d --build <<'YAML'
 services:
   backend:
@@ -129,12 +137,13 @@ services:
 YAML
 ```
 
-The backend applies database migrations and creates an administrator on
-first startup when no administrator exists. The bootstrap password does
-not reset an existing account.
+The password must contain 8 to 72 bytes, including uppercase and lowercase
+letters, a digit, and a supported special character such as `!`. The backend
+creates the administrator on first startup when none exists; the bootstrap
+password does not reset an existing account. Sign in as `admin@example.com`
+with the password you chose.
 
-Open <http://localhost:5173> and sign in as `admin@example.com` with the
-password you chose. The backend is available at <http://localhost:3000>.
+The backend is available at <http://localhost:3000>.
 
 To inspect startup or stop the stack:
 

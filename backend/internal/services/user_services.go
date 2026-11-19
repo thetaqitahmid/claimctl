@@ -18,9 +18,30 @@ import (
 	"golang.org/x/crypto/bcrypt"
 )
 
+// Errors returned by the first-run setup flow.
+var (
+	// ErrSetupAlreadyCompleted is returned when initial admin creation is
+	// attempted after an administrator already exists.
+	ErrSetupAlreadyCompleted = errors.New("setup already completed")
+	// ErrInvalidSetupInput is returned when first-run setup input fails
+	// validation.
+	ErrInvalidSetupInput = errors.New("invalid setup input")
+	// ErrSetupEmailInUse is returned when the requested setup email is already
+	// assigned to a user.
+	ErrSetupEmailInUse = errors.New("setup email already in use")
+)
+
 type LoginRequest struct {
 	Email    string `json:"email"`
 	Password string `json:"password"`
+}
+
+// InitialAdminRequest describes the first administrator created through the
+// first-run setup flow.
+type InitialAdminRequest struct {
+	Email    string
+	Name     string
+	Password string
 }
 
 type OIDCLoginRequest struct {
@@ -40,6 +61,8 @@ type UserService interface {
 	UpdateUser(ctx context.Context, req *UpdateUserRequest) error
 	DeleteUser(ctx context.Context, id uuid.UUID) error
 	EnsureAdminExists(ctx context.Context) error
+	NeedsSetup(ctx context.Context) (bool, error)
+	CreateInitialAdmin(ctx context.Context, req InitialAdminRequest) (*AdminUserResponse, error)
 	LoginOIDC(ctx context.Context, req OIDCLoginRequest) (*db.ClaimctlUser, error)
 	UpdateChannelConfig(ctx context.Context, userID uuid.UUID, slackDest, teamsUrl, notificationEmail string) (*AdminUserResponse, error)
 	UpdatePassword(ctx context.Context, userID uuid.UUID, currentPassword, newPassword string) error
@@ -314,12 +337,91 @@ func (s *userService) EnsureAdminExists(ctx context.Context) error {
 	}
 
 	if count == 0 {
+		if utils.GetEnv("ADMIN_PASSWORD", "") == "" {
+			slog.Info("No admin users found and ADMIN_PASSWORD is not set; first-run setup is required")
+			return nil
+		}
 		slog.Info("No admin users found, creating default admin user")
 		return s.createDefaultAdmin(ctx)
 	}
 
 	slog.Info("Found existing admin users, skipping default admin creation", "count", count)
 	return nil
+}
+
+// NeedsSetup reports whether the installation still requires its first
+// administrator. It is the source of truth for the first-run setup flow.
+func (s *userService) NeedsSetup(ctx context.Context) (bool, error) {
+	count, err := s.db.CountAdminUsers(ctx)
+	if err != nil {
+		return false, fmt.Errorf("failed to count admin users: %w", err)
+	}
+	return count == 0, nil
+}
+
+// CreateInitialAdmin creates the first administrator for a fresh installation.
+// The admin-count check and the insert share one transaction (serialized by the
+// store's advisory lock) so concurrent setup requests cannot both succeed.
+func (s *userService) CreateInitialAdmin(ctx context.Context, req InitialAdminRequest) (*AdminUserResponse, error) {
+	if req.Name == "" || req.Email == "" || req.Password == "" {
+		return nil, fmt.Errorf("%w: name, email, and password are required", ErrInvalidSetupInput)
+	}
+	if !utils.IsValidEmail(req.Email) {
+		return nil, fmt.Errorf("%w: email must be a valid email address", ErrInvalidSetupInput)
+	}
+	if !utils.IsValidPassword(req.Password) || len(req.Password) > 72 {
+		return nil, fmt.Errorf("%w: password must be 8 to 72 bytes and contain uppercase, lowercase, digit, and a supported special character", ErrInvalidSetupInput)
+	}
+
+	hashedPassword, err := bcrypt.GenerateFromPassword([]byte(req.Password), bcrypt.DefaultCost)
+	if err != nil {
+		return nil, fmt.Errorf("failed to hash password: %w", err)
+	}
+
+	var created db.ClaimctlUser
+	err = s.store.ExecTx(ctx, func(q db.Querier) error {
+		count, err := q.CountAdminUsers(ctx)
+		if err != nil {
+			return fmt.Errorf("failed to count admin users: %w", err)
+		}
+		if count != 0 {
+			return ErrSetupAlreadyCompleted
+		}
+
+		existingCount, err := q.VerifyUserEmailIsUnique(ctx, req.Email)
+		if err != nil {
+			return fmt.Errorf("failed to verify email uniqueness: %w", err)
+		}
+		if existingCount != 0 {
+			return ErrSetupEmailInUse
+		}
+
+		if err := q.CreateUser(ctx, db.CreateUserParams{
+			Email:        req.Email,
+			Name:         req.Name,
+			Password:     string(hashedPassword),
+			Role:         "admin",
+			Status:       "active",
+			LastLogin:    pgtype.Timestamptz{Valid: false},
+			AuthProvider: "local",
+			OidcSubject:  pgtype.Text{Valid: false},
+		}); err != nil {
+			return fmt.Errorf("failed to create initial admin: %w", err)
+		}
+
+		created, err = q.FindUserByEmail(ctx, req.Email)
+		if err != nil {
+			return fmt.Errorf("failed to retrieve created admin: %w", err)
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	slog.Info("Successfully created initial admin user", "email", created.Email)
+	response := adminUserResponse(created)
+	return response, nil
 }
 
 func (s *userService) createDefaultAdmin(ctx context.Context) error {

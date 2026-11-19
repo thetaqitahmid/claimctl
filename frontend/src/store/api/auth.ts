@@ -37,9 +37,20 @@ interface AuthMethodsResponse {
   oidc: boolean;
 }
 
+export interface SetupStatusResponse {
+  needsSetup: boolean;
+}
+
+export interface SetupAdminRequest {
+  name: string;
+  email: string;
+  password: string;
+  token: string;
+}
+
 export const authApiSlice = createApi({
   reducerPath: "auth",
-  tagTypes: ["User"],
+  tagTypes: ["User", "Setup"],
   baseQuery: baseQueryWithReauth,
   endpoints: (builder) => ({
     login: builder.mutation<authResponse, credentialType>({
@@ -49,6 +60,19 @@ export const authApiSlice = createApi({
         body: credentials,
       }),
       invalidatesTags: ["User"],
+    }),
+    getSetupStatus: builder.query<SetupStatusResponse, void>({
+      query: () => "/setup/status",
+      providesTags: ["Setup"],
+    }),
+    createInitialAdmin: builder.mutation<User, SetupAdminRequest>({
+      query: ({ token, ...body }) => ({
+        url: "/setup/admin",
+        method: "POST",
+        body,
+        headers: { "X-Setup-Token": token },
+      }),
+      invalidatesTags: ["Setup", "User"],
     }),
     getAuthMethods: builder.query<AuthMethodsResponse, void>({
       query: () => "/auth/methods",
@@ -97,4 +121,6 @@ export const {
   useLogoutMutation,
   useGetMeQuery,
   useGetAuthMethodsQuery,
+  useGetSetupStatusQuery,
+  useCreateInitialAdminMutation,
 } = authApiSlice;

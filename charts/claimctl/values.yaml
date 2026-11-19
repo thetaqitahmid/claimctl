@@ -43,6 +43,12 @@ backend:
   # production.
   trustedProxyCIDRs: "0.0.0.0/0,::/0"
   cookieSecure: true
+  # One-time token required to create the first administrator from the UI.
+  # Leave empty to let the backend generate and log a per-process token. Set a
+  # shared value when running more than one replica or when provisioning
+  # automatically. Alternatively bootstrap an admin with ADMIN_EMAIL and
+  # ADMIN_PASSWORD through backend.extraEnv.
+  setupToken: ""
   replicaCount: 1
   strategy: {}
   revisionHistoryLimit: 10

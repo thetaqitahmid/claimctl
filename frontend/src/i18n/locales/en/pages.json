@@ -12,6 +12,24 @@
     "invalidCredentials": "Invalid email or password",
     "footer": "© {{year}} claimctl. All rights reserved."
   },
+  "setup": {
+    "title": "Create administrator account",
+    "subtitle": "Finish first-run setup by creating the first administrator.",
+    "nameLabel": "Name",
+    "namePlaceholder": "Enter your name",
+    "emailLabel": "Email",
+    "emailPlaceholder": "Enter your email",
+    "passwordLabel": "Password",
+    "passwordPlaceholder": "Enter a strong password",
+    "confirmPasswordLabel": "Confirm password",
+    "confirmPasswordPlaceholder": "Re-enter your password",
+    "tokenLabel": "Setup token",
+    "tokenPlaceholder": "Paste the token from the backend logs",
+    "tokenHelp": "Find the token in the backend logs or in ./keys/setup-token.",
+    "createAccount": "Create account",
+    "passwordMismatch": "Passwords do not match",
+    "createFailed": "Failed to create administrator"
+  },
   "home": {
     "title": "Resources",
     "subtitle": "Manage resources and check availability",

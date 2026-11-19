@@ -23,6 +23,11 @@ administrator password and encryption key. Open that file to find
 `ADMIN_PASSWORD`, then sign in as `admin@example.com`. Existing configuration
 is never overwritten. Bootstrap credentials do not reset an existing account.
 
+To create the first administrator from the UI instead, start the backend
+without `ADMIN_PASSWORD`. It enters first-run setup mode; the one-time setup
+token is written to `backend/keys/setup-token` and logged to stdout. Reuse a
+fixed `SETUP_TOKEN` when running multiple backend replicas.
+
 The command starts PostgreSQL using `tests/db/postgres-compose.yaml`, waits
 for its health check, installs frontend dependencies when needed, and builds
 the backend. The backend applies migrations to the database configured in

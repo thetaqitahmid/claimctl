@@ -127,6 +127,14 @@ spec:
           env:
             - name: DATABASE_URL
               value: ""
+            # The root filesystem is read-only in production. Point HOME and the
+            # XDG cache at the writable emptyDir mounted at /tmp so libraries
+            # (for example the Swagger dependency tree) do not try to write
+            # under /home/appuser.
+            - name: HOME
+              value: /tmp
+            - name: XDG_CACHE_HOME
+              value: /tmp/.cache
             - name: TRUSTED_PROXY_CIDRS
               value: {{ .Values.backend.trustedProxyCIDRs | quote }}
             - name: COOKIE_SECURE

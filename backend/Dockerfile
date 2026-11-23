@@ -35,6 +35,11 @@ COPY --from=builder /app/migrations ./migrations
 # Change ownership of the app directory to non-root user
 RUN chown -R appuser:appgroup /app
 
+# Use writable locations when the container runs with a read-only root
+# filesystem. Some dependencies create cache directories at startup.
+ENV HOME=/tmp \
+    XDG_CACHE_HOME=/tmp/.cache
+
 # Switch to non-root user
 USER appuser
 

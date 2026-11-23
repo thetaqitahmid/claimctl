@@ -121,6 +121,55 @@ migrate -path migrations -database "postgresql://..." up
 The `make backend_up` command handles migrations automatically for dev
 environments.
 
+Migration history is always stored in `public.schema_migrations`, independent
+of the connection's `search_path`. Do not create a second
+`schema_migrations` table in another schema.
+
+### Recovering from a dirty migration
+
+A startup error such as `Dirty database version N` means a previous migration
+was interrupted. Stop every backend replica before changing migration state,
+and inspect the database before forcing anything.
+
+For the chart's bundled PostgreSQL:
+
+```bash
+kubectl -n <namespace> exec -it claimctl-postgres-0 -- \
+  sh -c 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB"'
+```
+
+```sql
+SELECT version, dirty FROM public.schema_migrations;
+SELECT table_name FROM information_schema.tables
+ WHERE table_schema = 'claimctl' ORDER BY table_name;
+```
+
+If migration `N` was applied completely, clear the dirty flag without
+re-running it:
+
+```sql
+UPDATE public.schema_migrations SET version = N, dirty = false;
+```
+
+If migration `N` was not applied at all, reset to the previous version so the
+backend applies it again:
+
+```sql
+UPDATE public.schema_migrations SET version = N - 1, dirty = false;
+```
+
+Only reset after confirming that none of migration `N`'s objects remain.
+Otherwise the retry can fail or create duplicates. On a fresh installation
+with no data, the simplest recovery for a partial migration 1 is:
+
+```sql
+DROP SCHEMA IF EXISTS claimctl CASCADE;
+UPDATE public.schema_migrations SET version = 0, dirty = false;
+```
+
+Do not drop a schema that contains data you need. Restart the backend only
+after the update.
+
 ### Seeding
 
 `make dev_up` seeds four spaces and 16 resources automatically. Repeated

@@ -80,6 +80,8 @@ class HelmReplicaTest(unittest.TestCase):
                          "10.244.0.0/16")
         self.assertEqual(environment["DATABASE_URL"]["value"], "")
         self.assertEqual(environment["COOKIE_SECURE"]["value"], "true")
+        self.assertEqual(environment["HOME"]["value"], "/tmp")
+        self.assertEqual(environment["XDG_CACHE_HOME"]["value"], "/tmp/.cache")
         self.assertIn("secretKeyRef",
                       environment["APP_ENCRYPTION_KEY"]["valueFrom"])
         frontend = self.environment(deployments["fixture-claimctl-frontend"])
